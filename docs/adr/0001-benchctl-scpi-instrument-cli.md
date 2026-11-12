@@ -331,7 +331,9 @@ reports the transport and SRQ status.
   `safe` does not validate limits, so a bad value can never keep an output on. `raw`, `script` and
   `raw` plan steps send SCPI unchecked and bypass the limits.
 - `benchctl safe` turns all outputs off on every instrument, and exits non-zero (3 if
-  unreachable, else 1) when any output is not confirmed off. Plans run it in a
+  unreachable, else 1) when any output is not confirmed off. Every automatic shutdown
+  (`safe`, plan cleanup, `wiring verify`) retries once over a fresh connection when the
+  session in use fails, because a VXI-11 link refuses all calls after a broken RPC. Plans run it in a
   deferred step (on failure and on SIGINT).
 - Load mismatch warning: if FG load is `50` but the scope coupling is `D1M`, warn that the
   amplitude will read 2× the setting (and the reverse).

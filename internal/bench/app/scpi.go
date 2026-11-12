@@ -225,7 +225,7 @@ func (a *App) safeWith(ctx context.Context, c *conns, b *domain.Bench) ([]SafeRe
 			out = append(out, r)
 			continue
 		}
-		if err := o.AllOutputsOff(ctx); err != nil {
+		if err := c.allOff(ctx, alias, o); err != nil {
 			r.Action, r.Error = "failed", err.Error()
 			if firstErr == nil {
 				firstErr = err

@@ -859,3 +859,36 @@ func mustPlan(t *testing.T, src string) *Plan {
 	}
 	return p
 }
+
+func TestShutdownRetriesOverFreshConnection(t *testing.T) {
+	ctx := context.Background()
+	// The session breaks right after CH1 goes on: the wiring check fails and
+	// every call on the cached session is refused, but the output must still
+	// end up off through a new connection.
+	a, b, _, _ := rig(t, straight)
+	b.Gens["fg"].PoisonAfterOn = true
+	rep, err := a.WiringVerify(ctx, nil)
+	if err == nil || rep.OK {
+		t.Fatalf("broken session must fail the check: %+v %v", rep, err)
+	}
+	if b.Gens["fg"].Ch(1).Output || b.Gens["fg"].Ch(2).Output {
+		t.Fatalf("output left on after a broken session: %+v", b.Gens["fg"].Calls())
+	}
+
+	// Same through a plan: the failed wiring check still runs the plan's safe.
+	a, b, _, _ = rig(t, straight)
+	b.Gens["fg"].PoisonAfterOn = true
+	p := mustPlan(t, "wiring:\n  - {from: \"fg:CH1\", to: \"scope:C1\"}\nsteps:\n  - wait: 1ms\n")
+	res, err := a.Apply(ctx, p, t.TempDir())
+	if err == nil || res.OK || len(res.Safe) == 0 || b.Gens["fg"].Ch(1).Output {
+		t.Fatalf("plan with failed wiring: %+v %v", res, err)
+	}
+
+	// And through safe on a session a failed step broke.
+	a, b, _, _ = rig(t, straight)
+	b.Gens["fg"].PoisonAfterOn = true
+	p = mustPlan(t, "steps:\n  - fg.output: {alias: fg, ch: 1, state: \"on\"}\n  - fg.set: {alias: fg, ch: 1, amp: 1}\n")
+	if _, err := a.Apply(ctx, p, t.TempDir()); err == nil || b.Gens["fg"].Ch(1).Output {
+		t.Fatalf("safe after a broken step: %v, output %v", err, b.Gens["fg"].Ch(1).Output)
+	}
+}

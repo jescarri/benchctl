@@ -189,7 +189,7 @@ func (a *App) WiringVerify(ctx context.Context, links []domain.Link) (rep Wiring
 		octx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		for _, alias := range slices.Sorted(maps.Keys(gens)) {
-			if offErr := gens[alias].(port.Outputs).AllOutputsOff(octx); offErr != nil {
+			if offErr := c.allOff(octx, alias, gens[alias].(port.Outputs)); offErr != nil {
 				// An output that may still be on fails the run, whatever the links said.
 				msg := fmt.Sprintf("could not switch off %s outputs: %v", alias, offErr)
 				a.warnf("%s", msg)

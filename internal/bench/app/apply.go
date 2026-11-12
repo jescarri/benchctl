@@ -237,14 +237,9 @@ func (a *App) Apply(ctx context.Context, p *Plan, baseDir string) (res PlanResul
 		return PlanResult{}, err
 	}
 	res = PlanResult{Name: p.Name, OK: true}
-	if p.verifyWiring() {
-		rep, werr := a.WiringVerify(ctx, p.Wiring)
-		res.Wiring = &rep
-		if werr != nil {
-			res.OK = false
-			return res, fmt.Errorf("wiring check before step 1: %w", werr)
-		}
-	}
+	// The safety net is registered before the wiring check, so a failed
+	// check also ends with every output switched off. c opens its own
+	// (fresh) sessions, so a session the check left broken cannot block it.
 	c := a.conns()
 	defer c.closeAll()
 	defer func() {
@@ -258,6 +253,14 @@ func (a *App) Apply(ctx context.Context, p *Plan, baseDir string) (res PlanResul
 			}
 		}
 	}()
+	if p.verifyWiring() {
+		rep, werr := a.WiringVerify(ctx, p.Wiring)
+		res.Wiring = &rep
+		if werr != nil {
+			res.OK = false
+			return res, fmt.Errorf("wiring check before step 1: %w", werr)
+		}
+	}
 	for i, step := range p.Steps {
 		var action string
 		var node yaml.Node

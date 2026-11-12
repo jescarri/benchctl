@@ -60,6 +60,34 @@ func (c *conns) get(ctx context.Context, alias string) (port.Instrument, error) 
 	return inst, nil
 }
 
+// allOff switches off every output of alias through o, its cached session.
+// A failed session can refuse every later call without reaching the
+// instrument (a VXI-11 link is unusable after a cancelled or broken RPC), so
+// on failure the session is closed (freeing the socket and the instrument
+// lock) and the shutdown is retried once over a fresh connection.
+func (c *conns) allOff(ctx context.Context, alias string, o port.Outputs) error {
+	err := o.AllOutputsOff(ctx)
+	if err == nil {
+		return nil
+	}
+	if inst, ok := c.m[alias]; ok {
+		_ = inst.Close()
+		delete(c.m, alias)
+	}
+	inst, rerr := c.get(ctx, alias)
+	if rerr != nil {
+		return fmt.Errorf("%w (reconnect for retry failed: %v)", err, rerr)
+	}
+	o2, ok := inst.(port.Outputs)
+	if !ok {
+		return err
+	}
+	if rerr := o2.AllOutputsOff(ctx); rerr != nil {
+		return fmt.Errorf("%w (retry over a new connection failed: %v)", err, rerr)
+	}
+	return nil
+}
+
 func (c *conns) closeAll() {
 	for k, inst := range c.m {
 		_ = inst.Close()

@@ -103,6 +103,7 @@ func (b *Bench) Open(_ context.Context, alias string) (port.Instrument, error) {
 	}
 	b.Opened = append(b.Opened, alias)
 	if g, ok := b.Gens[alias]; ok {
+		g.broken = false // a new session
 		return g, nil
 	}
 	if s, ok := b.Scopes[alias]; ok {
@@ -195,7 +196,14 @@ type Generator struct {
 	StateErr error
 	// OffErr, when set, makes AllOutputsOff fail after switching outputs off.
 	OffErr error
+	// PoisonAfterOn models a session that breaks right after an output is
+	// switched on (e.g. a cancelled RPC on a VXI-11 link): the output stays
+	// on and every later call fails until the instrument is opened again.
+	PoisonAfterOn bool
+	broken        bool
 }
+
+var errBroken = domain.Instrumentf("rpc: connection is broken after an earlier failure")
 
 // Calls returns every setting/output change in order, e.g. "C1 offset=5",
 // "C1 output=true" (tests).
@@ -224,6 +232,9 @@ func (g *Generator) SetWave(_ context.Context, ch int, w domain.WaveSpec) error 
 	}
 	g.bench.mu.Lock()
 	defer g.bench.mu.Unlock()
+	if g.broken {
+		return errBroken
+	}
 	st := &g.ch[ch]
 	g.calls = append(g.calls, fmt.Sprintf("C%d wave=%s", ch, describeWave(w)))
 	if w.Type != "" {
@@ -253,6 +264,9 @@ func (g *Generator) SetLoad(_ context.Context, ch int, load string) error {
 	}
 	g.bench.mu.Lock()
 	defer g.bench.mu.Unlock()
+	if g.broken {
+		return errBroken
+	}
 	g.ch[ch].Load = strings.ToLower(load)
 	return nil
 }
@@ -263,8 +277,14 @@ func (g *Generator) Output(_ context.Context, ch int, on bool) error {
 	}
 	g.bench.mu.Lock()
 	defer g.bench.mu.Unlock()
+	if g.broken {
+		return errBroken
+	}
 	g.calls = append(g.calls, fmt.Sprintf("C%d output=%t", ch, on))
 	g.ch[ch].Output = on
+	if on && g.PoisonAfterOn {
+		g.PoisonAfterOn, g.broken = false, true
+	}
 	return nil
 }
 
@@ -277,12 +297,17 @@ func (g *Generator) State(_ context.Context, ch int) (domain.GenChannelState, er
 	if g.StateErr != nil {
 		return domain.GenChannelState{}, g.StateErr
 	}
+	if g.broken {
+		return domain.GenChannelState{}, errBroken
+	}
 	return g.ch[ch], nil
 }
 
 func (g *Generator) AllOutputsOff(ctx context.Context) error {
 	for ch := 1; ch <= 2; ch++ {
-		_ = g.Output(ctx, ch, false)
+		if err := g.Output(ctx, ch, false); err != nil {
+			return err
+		}
 	}
 	return g.OffErr
 }
