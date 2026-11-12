@@ -95,9 +95,12 @@ func (b *Bench) Inventory() *domain.Bench {
 }
 
 // Open implements port.Connector.
-func (b *Bench) Open(_ context.Context, alias string) (port.Instrument, error) {
+func (b *Bench) Open(ctx context.Context, alias string) (port.Instrument, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return nil, domain.Unreachablef("open %s: %v", alias, err) // a real dial needs time
+	}
 	if err := b.OpenErrs[alias]; err != nil {
 		return nil, err
 	}
@@ -200,7 +203,10 @@ type Generator struct {
 	// switched on (e.g. a cancelled RPC on a VXI-11 link): the output stays
 	// on and every later call fails until the instrument is opened again.
 	PoisonAfterOn bool
-	broken        bool
+	// HangWhileBroken makes AllOutputsOff on a broken session wait for its
+	// context to end, as a dead TCP link does until the timeout.
+	HangWhileBroken bool
+	broken          bool
 }
 
 var errBroken = domain.Instrumentf("rpc: connection is broken after an earlier failure")
@@ -304,6 +310,13 @@ func (g *Generator) State(_ context.Context, ch int) (domain.GenChannelState, er
 }
 
 func (g *Generator) AllOutputsOff(ctx context.Context) error {
+	g.bench.mu.Lock()
+	hang := g.broken && g.HangWhileBroken
+	g.bench.mu.Unlock()
+	if hang {
+		<-ctx.Done()
+		return ctx.Err()
+	}
 	for ch := 1; ch <= 2; ch++ {
 		if err := g.Output(ctx, ch, false); err != nil {
 			return err

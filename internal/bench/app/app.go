@@ -60,6 +60,11 @@ func (c *conns) get(ctx context.Context, alias string) (port.Instrument, error) 
 	return inst, nil
 }
 
+// shutdownRetryBudget bounds the retry of a failed output shutdown. The retry
+// gets its own budget because the first attempt may have used up (or been
+// cancelled with) the caller's context.
+var shutdownRetryBudget = 10 * time.Second
+
 // allOff switches off every output of alias through o, its cached session.
 // A failed session can refuse every later call without reaching the
 // instrument (a VXI-11 link is unusable after a cancelled or broken RPC), so
@@ -74,15 +79,23 @@ func (c *conns) allOff(ctx context.Context, alias string, o port.Outputs) error 
 		_ = inst.Close()
 		delete(c.m, alias)
 	}
-	inst, rerr := c.get(ctx, alias)
+	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), shutdownRetryBudget)
+	defer cancel()
+	inst, rerr := c.get(rctx, alias)
 	if rerr != nil {
-		return fmt.Errorf("%w (reconnect for retry failed: %v)", err, rerr)
+		// Keep both messages; an unreachable instrument stays unreachable
+		// for the exit code.
+		werr := fmt.Errorf("%w (reconnect for retry failed: %w)", err, rerr)
+		if domain.KindOf(rerr) == domain.KindUnreachable {
+			return &domain.Error{Kind: domain.KindUnreachable, Err: werr}
+		}
+		return werr
 	}
 	o2, ok := inst.(port.Outputs)
 	if !ok {
 		return err
 	}
-	if rerr := o2.AllOutputsOff(ctx); rerr != nil {
+	if rerr := o2.AllOutputsOff(rctx); rerr != nil {
 		return fmt.Errorf("%w (retry over a new connection failed: %v)", err, rerr)
 	}
 	return nil

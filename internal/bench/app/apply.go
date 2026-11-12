@@ -249,7 +249,13 @@ func (a *App) Apply(ctx context.Context, p *Plan, baseDir string) (res PlanResul
 			sr, serr := a.safeWith(sctx, c, b)
 			res.Safe = sr
 			if serr != nil {
+				// Outputs possibly left on fail the plan; an earlier step
+				// error stays the one returned.
 				a.warnf("safe: %v", serr)
+				res.OK = false
+				if err == nil {
+					err = fmt.Errorf("safe on exit: %w", serr)
+				}
 			}
 		}
 	}()

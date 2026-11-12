@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jescarri/benchctl/internal/bench/adapter/fake"
 	"github.com/jescarri/benchctl/internal/bench/domain"
@@ -890,5 +891,64 @@ func TestShutdownRetriesOverFreshConnection(t *testing.T) {
 	p = mustPlan(t, "steps:\n  - fg.output: {alias: fg, ch: 1, state: \"on\"}\n  - fg.set: {alias: fg, ch: 1, amp: 1}\n")
 	if _, err := a.Apply(ctx, p, t.TempDir()); err == nil || b.Gens["fg"].Ch(1).Output {
 		t.Fatalf("safe after a broken step: %v, output %v", err, b.Gens["fg"].Ch(1).Output)
+	}
+}
+
+func TestShutdownRetryHasItsOwnBudget(t *testing.T) {
+	// The first attempt hangs on a dead session until the caller's deadline;
+	// the retry must still get time to reconnect and switch the output off.
+	a, b, _, _ := rig(t, straight)
+	c := a.conns()
+	defer c.closeAll()
+	g, err := c.generator(context.Background(), "fg")
+	must(t, err)
+	b.Gens["fg"].PoisonAfterOn, b.Gens["fg"].HangWhileBroken = true, true
+	must(t, g.Output(context.Background(), 1, true))
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if err := c.allOff(ctx, "fg", g.(port.Outputs)); err != nil || b.Gens["fg"].Ch(1).Output {
+		t.Fatalf("retry after an expired deadline: %v, output %v", err, b.Gens["fg"].Ch(1).Output)
+	}
+}
+
+func TestShutdownReconnectUnreachable(t *testing.T) {
+	a, b, _, _ := rig(t, straight)
+	c := a.conns()
+	defer c.closeAll()
+	g, err := c.generator(context.Background(), "fg")
+	must(t, err)
+	b.Gens["fg"].PoisonAfterOn = true
+	must(t, g.Output(context.Background(), 1, true))
+	b.OpenErrs["fg"] = domain.Unreachablef("no route to host")
+	err = c.allOff(context.Background(), "fg", g.(port.Outputs))
+	if domain.KindOf(err) != domain.KindUnreachable || !strings.Contains(err.Error(), "broken") || !strings.Contains(err.Error(), "no route") {
+		t.Fatalf("want unreachable with both messages, got %v", err)
+	}
+}
+
+func TestSafeOnExitFailureFailsPlan(t *testing.T) {
+	a, b, _, _ := rig(t, straight)
+	b.Gens["fg"].OffErr = domain.Instrumentf("OUTP OFF not acknowledged")
+	p := mustPlan(t, "safe_on_exit: true\nsteps:\n  - wait: 1ms\n")
+	res, err := a.Apply(context.Background(), p, t.TempDir())
+	if err == nil || res.OK || !strings.Contains(err.Error(), "safe on exit") {
+		t.Fatalf("failed safe_on_exit must fail the plan: %+v %v", res, err)
+	}
+	// An earlier step error stays the returned error.
+	p = mustPlan(t, "safe_on_exit: true\nsteps:\n  - fg.explode: {}\n")
+	if _, err := a.Apply(context.Background(), p, t.TempDir()); err == nil || !strings.Contains(err.Error(), "fg.explode") {
+		t.Fatalf("step error replaced: %v", err)
+	}
+}
+
+func TestSafeUnreachableWinsExitCode(t *testing.T) {
+	a, b, store, _ := rig(t, straight)
+	b.AddGenerator("fg2")
+	store.B.Instruments["fg2"] = b.Inventory().Instruments["fg2"]
+	b.OpenErrs["fg"] = domain.Unreachablef("down")
+	b.Gens["fg2"].OffErr = domain.Instrumentf("OUTP OFF not acknowledged")
+	_, err := a.Safe(context.Background())
+	if domain.KindOf(err) != domain.KindUnreachable || !strings.Contains(err.Error(), "fg") || !strings.Contains(err.Error(), "not acknowledged") {
+		t.Fatalf("want unreachable keeping the other failure, got %v", err)
 	}
 }

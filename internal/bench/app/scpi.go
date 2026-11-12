@@ -235,13 +235,18 @@ func (a *App) safeWith(ctx context.Context, c *conns, b *domain.Bench) ([]SafeRe
 		}
 		out = append(out, r)
 	}
+	if unreachable {
+		// An unreachable generator decides the exit code (3); any other
+		// shutdown failure is kept in the message.
+		msg := fmt.Sprintf("outputs not confirmed off on %s", strings.Join(unconfirmed, ", "))
+		if firstErr != nil {
+			return out, domain.Unreachablef("%s; %w", msg, firstErr)
+		}
+		return out, domain.Unreachablef("%s", msg)
+	}
 	if firstErr == nil && len(unconfirmed) > 0 {
 		// An output that could not be switched off is not safe: never exit 0.
-		msg := fmt.Sprintf("outputs not confirmed off on %s", strings.Join(unconfirmed, ", "))
-		if unreachable {
-			return out, domain.Unreachablef("%s", msg)
-		}
-		return out, domain.Instrumentf("%s", msg)
+		return out, domain.Instrumentf("outputs not confirmed off on %s", strings.Join(unconfirmed, ", "))
 	}
 	return out, firstErr
 }
