@@ -1,0 +1,200 @@
+// Package app holds the benchctl use cases. It depends only on domain and
+// port; adapters are injected.
+package app
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"sort"
+	"time"
+
+	"github.com/jescarri/benchctl/internal/bench/domain"
+	"github.com/jescarri/benchctl/internal/bench/port"
+)
+
+// App wires the use cases to their ports.
+type App struct {
+	Store     port.ConfigStore
+	Connector port.Connector
+	Scanner   port.Discoverer
+	// RoleOf maps a model to its role (adapter knowledge, injected).
+	RoleOf func(model string) domain.Role
+	// Warn receives human-readable warnings (stderr).
+	Warn io.Writer
+	// Sleep is time.Sleep; tests replace it.
+	Sleep func(time.Duration)
+}
+
+func (a *App) sleep(d time.Duration) {
+	if a.Sleep != nil {
+		a.Sleep(d)
+		return
+	}
+	time.Sleep(d)
+}
+
+func (a *App) warnf(format string, args ...any) {
+	if a.Warn != nil {
+		_, _ = fmt.Fprintf(a.Warn, "warning: "+format+"\n", args...)
+	}
+}
+
+// conns caches open instruments for the duration of one use case.
+type conns struct {
+	a *App
+	m map[string]port.Instrument
+}
+
+func (a *App) conns() *conns { return &conns{a: a, m: map[string]port.Instrument{}} }
+
+func (c *conns) get(ctx context.Context, alias string) (port.Instrument, error) {
+	if inst, ok := c.m[alias]; ok {
+		return inst, nil
+	}
+	inst, err := c.a.Connector.Open(ctx, alias)
+	if err != nil {
+		return nil, err
+	}
+	c.m[alias] = inst
+	return inst, nil
+}
+
+// shutdownRetryBudget bounds the retry of a failed output shutdown. The retry
+// gets its own budget because the first attempt may have used up (or been
+// cancelled with) the caller's context.
+var shutdownRetryBudget = 10 * time.Second
+
+// shutdownBudget bounds the shutdown of one instrument (open + all outputs
+// off). Each instrument gets its own, independent of the caller's context, so
+// one that hangs cannot use up the next one's chance to be switched off.
+var shutdownBudget = 10 * time.Second
+
+// allOff switches off every output of alias through o, its cached session.
+// A failed session can refuse every later call without reaching the
+// instrument (a VXI-11 link is unusable after a cancelled or broken RPC), so
+// on failure the session is closed (freeing the socket and the instrument
+// lock) and the shutdown is retried once over a fresh connection.
+func (c *conns) allOff(ctx context.Context, alias string, o port.Outputs) error {
+	err := o.AllOutputsOff(ctx)
+	if err == nil {
+		return nil
+	}
+	if inst, ok := c.m[alias]; ok {
+		_ = inst.Close()
+		delete(c.m, alias)
+	}
+	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), shutdownRetryBudget)
+	defer cancel()
+	inst, rerr := c.get(rctx, alias)
+	if rerr != nil {
+		// Keep both messages; an unreachable instrument stays unreachable
+		// for the exit code.
+		werr := fmt.Errorf("%w (reconnect for retry failed: %w)", err, rerr)
+		if domain.KindOf(rerr) == domain.KindUnreachable {
+			return &domain.Error{Kind: domain.KindUnreachable, Err: werr}
+		}
+		return werr
+	}
+	o2, ok := inst.(port.Outputs)
+	if !ok {
+		return err
+	}
+	if rerr := o2.AllOutputsOff(rctx); rerr != nil {
+		return fmt.Errorf("%w (retry over a new connection failed: %v)", err, rerr)
+	}
+	return nil
+}
+
+func (c *conns) closeAll() {
+	for k, inst := range c.m {
+		_ = inst.Close()
+		delete(c.m, k)
+	}
+}
+
+func (c *conns) scope(ctx context.Context, alias string) (port.Scope, error) {
+	inst, err := c.get(ctx, alias)
+	if err != nil {
+		return nil, err
+	}
+	s, ok := inst.(port.Scope)
+	if !ok {
+		return nil, domain.Usagef("%s (%s) is not a supported oscilloscope", alias, inst.Identity().Model)
+	}
+	return s, nil
+}
+
+func (c *conns) generator(ctx context.Context, alias string) (port.Generator, error) {
+	inst, err := c.get(ctx, alias)
+	if err != nil {
+		return nil, err
+	}
+	g, ok := inst.(port.Generator)
+	if !ok {
+		return nil, domain.Usagef("%s (%s) is not a supported function generator", alias, inst.Identity().Model)
+	}
+	return g, nil
+}
+
+func (c *conns) dmm(ctx context.Context, alias string) (port.DMM, error) {
+	inst, err := c.get(ctx, alias)
+	if err != nil {
+		return nil, err
+	}
+	d, ok := inst.(port.DMM)
+	if !ok {
+		return nil, domain.Usagef("%s (%s) is not a supported multimeter", alias, inst.Identity().Model)
+	}
+	return d, nil
+}
+
+// bench loads the inventory.
+func (a *App) bench() (*domain.Bench, error) { return a.Store.Load() }
+
+// benchForOutputs loads the inventory for an operation that can energize a
+// generator output: every configured limit must be a usable number, so a
+// typo is a config error instead of "no limit". Shutdown paths (safe) use
+// bench, so an invalid limit never keeps an output on.
+func (a *App) benchForOutputs() (*domain.Bench, error) {
+	b, err := a.bench()
+	if err != nil {
+		return nil, err
+	}
+	if err := b.ValidateLimits(); err != nil {
+		return nil, domain.Usagef("%s: %v", a.Store.Path(), err)
+	}
+	return b, nil
+}
+
+func (a *App) roleOf(model string) domain.Role {
+	if a.RoleOf == nil {
+		return domain.RoleUnknown
+	}
+	return a.RoleOf(model)
+}
+
+// ResolveAlias returns alias if set, else the single inventory alias with the given role.
+func (a *App) ResolveAlias(alias string, role domain.Role) (string, error) {
+	if alias != "" {
+		return alias, nil
+	}
+	b, err := a.bench()
+	if err != nil {
+		return "", err
+	}
+	var matches []string
+	for name, ref := range b.Instruments {
+		if a.roleOf(ref.Model) == role {
+			matches = append(matches, name)
+		}
+	}
+	sort.Strings(matches)
+	switch len(matches) {
+	case 0:
+		return "", domain.Usagef("no %s in the inventory (%s); run `benchctl discover --save`", role, a.Store.Path())
+	case 1:
+		return matches[0], nil
+	}
+	return "", domain.Usagef("several instruments with role %s (%v); pass --alias", role, matches)
+}

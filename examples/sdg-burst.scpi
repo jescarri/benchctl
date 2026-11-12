@@ -1,0 +1,6 @@
+# Generator CH2: 10-cycle 10 kHz sine burst, manual trigger.
+# Run: benchctl script fg examples/sdg-burst.scpi
+// Lines starting with "# " or "//" are comments.
+C2:BSWV WVTP,SINE,FRQ,10000,AMP,1,OFST,0
+C2:BTWV STATE,ON,GATE_NCYC,NCYC,TRSR,MAN,TIME,10
+C2:BTWV?

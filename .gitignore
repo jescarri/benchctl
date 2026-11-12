@@ -1,0 +1,4 @@
+bin/
+*.bmp
+*.csv
+!internal/**/testdata/*
