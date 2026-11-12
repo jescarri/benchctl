@@ -91,7 +91,7 @@ func Summarize(wf domain.Waveform) WaveSummary {
 
 // PeakFrequency returns the frequency of the largest non-DC spectral bin,
 // refined by parabolic interpolation. Uses a radix-2 FFT on a Hann-windowed
-// copy truncated to a power of two.
+// copy zero-padded to a power of two, so every sample is analysed.
 //
 // A long record is never transformed whole (a 14 Mpts capture would allocate
 // hundreds of MB). It is cut into consecutive full-rate windows of maxFFT
@@ -132,24 +132,27 @@ func PeakFrequency(v []float64, dt float64) float64 {
 }
 
 // peakFFT returns the interpolated peak frequency of v and that bin's
-// magnitude (0, 0 when there is no usable peak).
+// magnitude (0, 0 when there is no usable peak). The Hann window spans all
+// of v, which is zero-padded to the next power of two: truncating instead
+// would drop up to half the samples (and any signal only in that tail).
 func peakFFT(v []float64, dt float64) (float64, float64) {
-	n := 1
-	for n*2 <= len(v) {
-		n *= 2
-	}
-	if n < 8 || dt <= 0 {
+	m := len(v)
+	if m < 8 || dt <= 0 {
 		return 0, 0
 	}
+	n := 1
+	for n < m {
+		n *= 2
+	}
 	mean := 0.0
-	for _, x := range v[:n] {
+	for _, x := range v {
 		mean += x
 	}
-	mean /= float64(n)
+	mean /= float64(m)
 	buf := make([]complex128, n)
-	for i := 0; i < n; i++ {
-		w := 0.5 - 0.5*math.Cos(2*math.Pi*float64(i)/float64(n-1))
-		buf[i] = complex((v[i]-mean)*w, 0)
+	for i, x := range v {
+		w := 0.5 - 0.5*math.Cos(2*math.Pi*float64(i)/float64(m-1))
+		buf[i] = complex((x-mean)*w, 0)
 	}
 	fft(buf)
 	best, bi := 0.0, 0

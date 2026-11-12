@@ -387,6 +387,15 @@ func TestPeakFrequency(t *testing.T) {
 	if f := PeakFrequency(long, 1e-7); math.Abs(f-2e6)/2e6 > 0.01 {
 		t.Fatalf("late 2 MHz signal: %v", f)
 	}
+	// 1.5 Mpts decimates to 786 k points, not a power of two: a signal only
+	// in the last part of the record must still be analysed.
+	tail := make([]float64, 3<<19)
+	for i := 1_100_000; i < len(tail); i++ {
+		tail[i] = math.Sin(2 * math.Pi * 1000 * float64(i) * 1e-7)
+	}
+	if f := PeakFrequency(tail, 1e-7); math.Abs(f-1000)/1000 > 0.01 {
+		t.Fatalf("signal in the record tail: %v", f)
+	}
 }
 
 func TestParseExpectation(t *testing.T) {
@@ -789,8 +798,14 @@ func TestWiringVerifyUnknownSource(t *testing.T) {
 	a, _, _, _ := rig(t, straight)
 	// The DMM reads the external 5 V: a typo in the source must not pass.
 	l := []domain.Link{{From: "fgg:CH1", To: "dmm:V", Expect: &domain.Expect{Function: "vdc", Value: 5, Tolerance: "5%"}}}
-	if _, err := a.WiringVerify(context.Background(), l); domain.KindOf(err) != domain.KindUsage || !strings.Contains(err.Error(), "fgg") {
-		t.Fatalf("unknown source: %v", err)
+	if rep, err := a.WiringVerify(context.Background(), l); domain.KindOf(err) != domain.KindUsage || !strings.Contains(err.Error(), "fgg") || rep.OK {
+		t.Fatalf("unknown source: %+v %v", rep, err)
+	}
+	// Errors before any check also leave the report failed.
+	for _, bad := range [][]domain.Link{{{From: "fg:CH1", To: "scop:C1"}}, {{From: "fg", To: "scope:C1"}}} {
+		if rep, err := a.WiringVerify(context.Background(), bad); err == nil || rep.OK {
+			t.Fatalf("%v: %+v %v", bad, rep, err)
+		}
 	}
 }
 

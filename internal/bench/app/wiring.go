@@ -143,6 +143,13 @@ func (a *App) WiringVerify(ctx context.Context, links []domain.Link) (rep Wiring
 	c := a.conns()
 	defer c.closeAll()
 	rep = WiringReport{OK: true}
+	// Registered first so it runs last: any error, from link validation
+	// onwards or from the output shutdown below, marks the report failed.
+	defer func() {
+		if err != nil {
+			rep.OK = false
+		}
+	}()
 
 	var fs []genScopeLink
 	var dmmLinks []domain.Link
@@ -192,9 +199,6 @@ func (a *App) WiringVerify(ctx context.Context, links []domain.Link) (rep Wiring
 					err = domain.Instrumentf("wiring verify: could not switch off %s outputs: %v", alias, offErr)
 				}
 			}
-		}
-		if err != nil {
-			rep.OK = false // every failure path, including errors from the checks
 		}
 	}()
 	getGen := func(alias string) (port.Generator, error) {
