@@ -36,10 +36,18 @@ func AcquireFileLock(ctx context.Context, dir, serial string, wait time.Duration
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
-	path := filepath.Join(dir, unsafeChars.ReplaceAllString(serial, "_")+".lock")
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
-	if err != nil {
+	if err := checkLockDir(dir); err != nil {
 		return nil, err
+	}
+	path := filepath.Join(dir, unsafeChars.ReplaceAllString(serial, "_")+".lock")
+	// O_NOFOLLOW: a planted symlink must not make us truncate its target.
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("lock file %s: %w", path, err)
+	}
+	if fi, err := f.Stat(); err != nil || !fi.Mode().IsRegular() {
+		_ = f.Close()
+		return nil, fmt.Errorf("lock file %s is not a regular file", path)
 	}
 	deadline := time.Now().Add(wait)
 	for {
@@ -64,6 +72,34 @@ func AcquireFileLock(ctx context.Context, dir, serial string, wait time.Duration
 		case <-time.After(50 * time.Millisecond):
 		}
 	}
+}
+
+// checkLockDir refuses a lock directory another user could have prepared:
+// LockDir's fallback (/tmp/benchctl-<uid>) has a predictable name in a shared
+// directory. It must be a real directory (not a symlink), owned by us, not
+// world-writable, and group-writable only for our own group.
+func checkLockDir(dir string) error {
+	fi, err := os.Lstat(dir)
+	if err != nil {
+		return err
+	}
+	if !fi.IsDir() {
+		return fmt.Errorf("lock directory %s is not a directory (symlink?)", dir)
+	}
+	perm := fi.Mode().Perm()
+	if perm&0o002 != 0 {
+		return fmt.Errorf("lock directory %s is world-writable (%v)", dir, perm)
+	}
+	if st, ok := fi.Sys().(*syscall.Stat_t); ok {
+		if int(st.Uid) != os.Getuid() {
+			return fmt.Errorf("lock directory %s is owned by uid %d, not %d", dir, st.Uid, os.Getuid())
+		}
+		// Group-writable is fine for the user's own (private) group only.
+		if perm&0o020 != 0 && int(st.Gid) != os.Getgid() {
+			return fmt.Errorf("lock directory %s is writable by group %d (%v)", dir, st.Gid, perm)
+		}
+	}
+	return nil
 }
 
 func trimNL(b []byte) string {

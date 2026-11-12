@@ -49,13 +49,30 @@ func CheckGenLimits(b *domain.Bench, alias string, w domain.WaveSpec, cur domain
 	if wave == "dc" {
 		amp = 0
 	}
-	if lim, ok := b.Limit(alias, "max_amp_vpp"); ok && amp > lim {
+	limit := func(key string) (float64, bool, error) {
+		v, set, err := b.LimitValue(alias, key)
+		if err != nil {
+			return 0, false, domain.Usagef("invalid bench limit: %v", err)
+		}
+		return v, set, nil
+	}
+	lim, set, err := limit("max_amp_vpp")
+	if err != nil {
+		return err
+	}
+	if set && amp > lim {
 		return domain.Usagef("amplitude %g Vpp exceeds %s limit max_amp_vpp=%g", amp, alias, lim)
 	}
-	if lim, ok := b.Limit(alias, "max_abs_v"); ok && math.Abs(off)+amp/2 > lim {
+	if lim, set, err = limit("max_abs_v"); err != nil {
+		return err
+	}
+	if set && math.Abs(off)+amp/2 > lim {
 		return domain.Usagef("peak |offset|+amp/2 = %g V exceeds %s limit max_abs_v=%g", math.Abs(off)+amp/2, alias, lim)
 	}
-	if lim, ok := b.Limit(alias, "max_freq_hz"); ok && w.Freq != nil && *w.Freq > lim {
+	if lim, set, err = limit("max_freq_hz"); err != nil {
+		return err
+	}
+	if set && w.Freq != nil && *w.Freq > lim {
 		return domain.Usagef("frequency %g Hz exceeds %s limit max_freq_hz=%g", *w.Freq, alias, lim)
 	}
 	return nil

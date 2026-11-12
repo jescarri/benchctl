@@ -91,8 +91,22 @@ func Summarize(wf domain.Waveform) WaveSummary {
 
 // PeakFrequency returns the frequency of the largest non-DC spectral bin,
 // refined by parabolic interpolation. Uses a radix-2 FFT on a Hann-windowed
-// copy truncated to a power of two.
+// copy truncated to a power of two. Long records are decimated first so the
+// transform stays at most maxFFT points (a full 14 Mpts capture would
+// otherwise allocate hundreds of MB).
 func PeakFrequency(v []float64, dt float64) float64 {
+	const maxFFT = 1 << 20
+	if step := (len(v) + maxFFT - 1) / maxFFT; step > 1 {
+		d := make([]float64, 0, len(v)/step+1)
+		for i := 0; i+step <= len(v); i += step {
+			sum := 0.0 // box-average each block: a cheap anti-alias filter
+			for _, x := range v[i : i+step] {
+				sum += x
+			}
+			d = append(d, sum/float64(step))
+		}
+		v, dt = d, dt*float64(step)
+	}
 	n := 1
 	for n*2 <= len(v) {
 		n *= 2

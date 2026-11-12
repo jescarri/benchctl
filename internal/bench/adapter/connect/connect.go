@@ -97,13 +97,18 @@ func (c *Connector) Open(ctx context.Context, alias string) (port.Instrument, er
 		return nil, err
 	}
 	c.logf("benchctl: %s (%s) not at %s (%v); rescanning %s", alias, ref.Serial, ref.LastIP, err, bench.Subnet)
-	found, serr := c.Discoverer.Scan(ctx, bench.Subnet)
+	found, serr := c.rescan(ctx, bench.Subnet, tr)
 	if serr != nil {
 		return nil, domain.Unreachablef("%s: %v; rediscovery failed: %v", alias, err, serr)
 	}
 	for _, f := range found {
 		if f.Identity.Serial != ref.Serial {
 			continue
+		}
+		// Persist the new address only once it has been opened.
+		inst, oerr := c.OpenAddr(ctx, f.IP, tr, ref.Serial)
+		if oerr != nil {
+			return nil, oerr
 		}
 		ref.LastIP = f.IP
 		bench.Instruments[alias] = ref
@@ -112,9 +117,24 @@ func (c *Connector) Open(ctx context.Context, alias string) (port.Instrument, er
 		} else {
 			c.logf("benchctl: %s moved to %s; inventory updated", alias, f.IP)
 		}
-		return withSRQ(c.OpenAddr(ctx, f.IP, tr, ref.Serial))(ref)
+		return withSRQ(inst, nil)(ref)
 	}
 	return nil, domain.Unreachablef("%s (serial %s) not found on %s%s", alias, ref.Serial, bench.Subnet, rawHintFor(tr))
+}
+
+// transportScanner is a Discoverer that can include the raw socket in one
+// scan (discovery.Scanner).
+type transportScanner interface {
+	ScanTransport(ctx context.Context, cidr string, raw bool) ([]port.Found, error)
+}
+
+// rescan looks for instruments on subnet. An instrument whose selected
+// transport is raw is looked for over raw too; others never are.
+func (c *Connector) rescan(ctx context.Context, subnet, transport string) ([]port.Found, error) {
+	if ts, ok := c.Discoverer.(transportScanner); ok {
+		return ts.ScanTransport(ctx, subnet, transport == TransportRaw)
+	}
+	return c.Discoverer.Scan(ctx, subnet)
 }
 
 // OpenAddr connects to ip with the given transport. If serial is non-empty
@@ -138,6 +158,9 @@ func (c *Connector) OpenAddr(ctx context.Context, ip, transport, serial string) 
 	t, err := c.dialTransport(ctx, ip, transport)
 	if err != nil {
 		_ = lock.Release()
+		if domain.KindOf(err) == domain.KindUsage { // unknown transport name
+			return nil, err
+		}
 		return nil, domain.Unreachablef("%s: %v%s", ip, err, rawHintFor(transport))
 	}
 	if c.Trace != nil {
@@ -169,11 +192,14 @@ func (c *Connector) OpenAddr(ctx context.Context, ip, transport, serial string) 
 	}
 	// Instrument-side lock (VXI-11). Siglent firmware accepts it but does not
 	// enforce it between links; the file lock is the effective guard.
-	if err := t.Lock(ctx, c.LockWait); err != nil {
+	// A failed lock RPC can leave the link broken, so only "not supported"
+	// is tolerated.
+	if err := t.Lock(ctx, c.LockWait); err != nil && !vxi11.IsCode(err, vxi11.ErrCodeNotSupported) {
+		_ = closer()
 		if vxi11.IsCode(err, vxi11.ErrCodeLocked) {
-			_ = closer()
 			return nil, domain.Instrumentf("%s is locked by another VXI-11 client", ip)
 		}
+		return nil, domain.Instrumentf("%s: device_lock: %v", ip, err)
 	}
 	inst, err := siglent.Open(ctx, sess, id, closer)
 	if err != nil {

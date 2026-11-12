@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/urfave/cli/v3"
@@ -28,7 +29,11 @@ func rawCmd(e *env) *cli.Command {
 			if c.NArg() != 2 {
 				return domain.Usagef("usage: benchctl raw <alias> \"<SCPI>\"")
 			}
-			r, err := e.app.Raw(ctx, c.Args().Get(0), c.Args().Get(1), app.RawOptions{
+			cmd := c.Args().Get(1)
+			if c.String("output") != "" && !strings.Contains(cmd, "?") && !c.Bool("read") && !c.Bool("block") {
+				return domain.Usagef("-o needs a response: %q is not a query; add --read if it returns one (e.g. SCDP)", cmd)
+			}
+			r, err := e.app.Raw(ctx, c.Args().Get(0), cmd, app.RawOptions{
 				Block: c.Bool("block"), Read: c.Bool("read"), OPC: c.Bool("opc"), Wait: c.String("wait"), Timeout: c.Duration("timeout"),
 			})
 			if err != nil {

@@ -211,7 +211,13 @@ func scopeCmd(e *env) *cli.Command {
 						return err
 					}
 					if d := c.Duration("settle"); d > 0 {
-						time.Sleep(d)
+						t := time.NewTimer(d)
+						select {
+						case <-ctx.Done():
+							t.Stop()
+							return ctx.Err()
+						case <-t.C:
+						}
 					}
 					return e.emitResult(e.app.ScopeMeasure(ctx, c.String("alias"), ch, c.Args().Slice()[1:]))
 				},
@@ -229,6 +235,9 @@ func scopeCmd(e *env) *cli.Command {
 				Action: func(ctx context.Context, c *cli.Command) error {
 					if c.NArg() < 1 {
 						return domain.Usagef("usage: benchctl scope capture <ch>... -o out.csv")
+					}
+					if c.Bool("raw") && c.String("output") == "" {
+						return domain.Usagef("--raw saves the blocks next to the --output file; give -o out.csv")
 					}
 					var out []app.WaveSummary
 					for i := 0; i < c.NArg(); i++ {

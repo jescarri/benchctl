@@ -165,10 +165,13 @@ func (s *SCPI) RunAndWait(ctx context.Context, cmd, method string) (string, erro
 		return method, err
 	}
 	s.log("*OPC?")
-	if method == "" || method == "auto" {
-		method = "opc"
+	// The fake only implements *OPC?: report that, and refuse methods it
+	// would only pretend to use.
+	switch method {
+	case "", "auto", "opc":
+		return "opc", nil
 	}
-	return method, nil
+	return "opc", domain.Usagef("fake instrument implements only opc completion, not %q", method)
 }
 func (s *SCPI) TransportName() string { return "fake" }
 func (s *SCPI) log(c string) {
@@ -380,7 +383,7 @@ func (s *Scope) Autoset(context.Context) (bool, error) {
 	for ch := 1; ch <= 4; ch++ {
 		if st, gain, ok := s.signal(ch); ok {
 			v := st.AmpVpp * gain / 5
-			changed = changed || s.ch[ch].VDiv != v
+			changed = changed || s.ch[ch].VDiv != v || !s.ch[ch].On
 			s.ch[ch].VDiv, s.ch[ch].On = v, true
 		}
 	}

@@ -84,7 +84,7 @@ func (c *Client) EnableSRQ(ctx context.Context) error {
 
 	fail := func(err error) error {
 		c.srq.mu.Lock()
-		c.srq.ln = nil
+		c.srq.ln, c.srq.ch = nil, nil // WaitSRQ then reports "not established"
 		c.srq.mu.Unlock()
 		_ = ln.Close()
 		return err
@@ -151,9 +151,9 @@ func (c *Client) DrainSRQ() {
 // WaitSRQ blocks until the instrument asserts a service request or ctx ends.
 func (c *Client) WaitSRQ(ctx context.Context) error {
 	c.srq.mu.Lock()
-	ch := c.srq.ch
+	ch, ln, closed := c.srq.ch, c.srq.ln, c.srq.closed
 	c.srq.mu.Unlock()
-	if ch == nil {
+	if ch == nil || ln == nil || closed {
 		return &DeviceError{Op: "wait_srq", Code: 6} // channel not established
 	}
 	select {

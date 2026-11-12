@@ -78,10 +78,13 @@ type LinkCheck struct {
 
 // WiringReport is the result of WiringVerify.
 type WiringReport struct {
-	OK       bool        `json:"ok"`
-	Links    []LinkCheck `json:"links"`
-	Restored []string    `json:"restored,omitempty"`
-	Warnings []string    `json:"warnings,omitempty"`
+	OK    bool        `json:"ok"`
+	Links []LinkCheck `json:"links"`
+	// Unchecked lists links with no electrical check (e.g. to an external
+	// device, or a DMM link without "expect"). They never count as verified.
+	Unchecked []LinkCheck `json:"unchecked,omitempty"`
+	Restored  []string    `json:"restored,omitempty"`
+	Warnings  []string    `json:"warnings,omitempty"`
 }
 
 // Test signal parameters for generator → scope checks: a distinctive
@@ -155,8 +158,13 @@ func (a *App) WiringVerify(ctx context.Context, links []domain.Link) (WiringRepo
 			fs = append(fs, genScopeLink{link: l, fg: from.Alias, scope: to.Alias, fgCh: fch, scopeCh: sch})
 		case tok && a.roleOf(tr.Model) == domain.RoleDMM:
 			dmmLinks = append(dmmLinks, l)
+		case !tok && !externalAlias(to.Alias):
+			// Every checkable destination is an inventory instrument, so an
+			// unknown one is a typo, not a link to pass unchecked.
+			return rep, domain.Usagef("link %s → %s: unknown instrument %q (external destinations use %s)",
+				l.From, l.To, to.Alias, strings.Join(externalAliases, ", "))
 		default:
-			rep.Links = append(rep.Links, LinkCheck{From: l.From, To: l.To, OK: true, Method: "none",
+			rep.Unchecked = append(rep.Unchecked, LinkCheck{From: l.From, To: l.To, Method: methodNone,
 				Observed: "no electrical check available for this link type"})
 		}
 	}
@@ -188,7 +196,7 @@ func (a *App) WiringVerify(ctx context.Context, links []domain.Link) (WiringRepo
 	}
 
 	if len(fs) > 0 {
-		checks, restored, err := a.verifyGenScope(ctx, c, getGen, fs)
+		checks, restored, err := a.verifyGenScope(ctx, c, b, getGen, fs)
 		rep.Restored = append(rep.Restored, restored...)
 		if err != nil {
 			return rep, err
@@ -200,7 +208,18 @@ func (a *App) WiringVerify(ctx context.Context, links []domain.Link) (WiringRepo
 		if err != nil {
 			return rep, err
 		}
+		if chk.Method == methodNone {
+			rep.Unchecked = append(rep.Unchecked, chk)
+			continue
+		}
 		rep.Links = append(rep.Links, chk)
+	}
+	for _, l := range rep.Unchecked {
+		a.warnf("wiring: %s → %s not verified: %s", l.From, l.To, l.Observed)
+	}
+	if len(rep.Links) == 0 {
+		rep.OK = false
+		return rep, domain.Verifyf("wiring verification failed: none of the %d links can be checked electrically", len(rep.Unchecked))
 	}
 	for _, l := range rep.Links {
 		rep.OK = rep.OK && l.OK
@@ -215,6 +234,23 @@ func (a *App) WiringVerify(ctx context.Context, links []domain.Link) (WiringRepo
 		return rep, domain.Verifyf("wiring verification failed: %s", strings.Join(bad, "; "))
 	}
 	return rep, nil
+}
+
+// methodNone marks a link that was not electrically checked.
+const methodNone = "none"
+
+// externalAliases are endpoint aliases for things outside the inventory
+// (external supplies, the device under test). Links to them are shown but
+// cannot be verified.
+var externalAliases = []string{"ext", "dut"}
+
+func externalAlias(alias string) bool {
+	for _, e := range externalAliases {
+		if alias == e {
+			return true
+		}
+	}
+	return false
 }
 
 type genScopeLink struct {
@@ -246,7 +282,7 @@ func restorableWave(st domain.GenChannelState) domain.WaveSpec {
 	return w
 }
 
-func (a *App) verifyGenScope(ctx context.Context, c *conns, getGen genGetter, links []genScopeLink) (checks []LinkCheck, restored []string, err error) {
+func (a *App) verifyGenScope(ctx context.Context, c *conns, b *domain.Bench, getGen genGetter, links []genScopeLink) (checks []LinkCheck, restored []string, err error) {
 	var gensUsed, scopesUsed []chanKey
 	seenG, seenS := map[chanKey]bool{}, map[chanKey]bool{}
 	for _, l := range links {
@@ -273,6 +309,15 @@ func (a *App) verifyGenScope(ctx context.Context, c *conns, getGen genGetter, li
 			return nil, nil, err
 		}
 		savedGen[g] = st
+	}
+	// The test signals are small (1 Vpp, no offset) but still must respect
+	// the bench limits; check them all before any setting changes.
+	for i, g := range gensUsed {
+		f, amp, zero := testFreqs[i%len(testFreqs)], testAmp, 0.0
+		w := domain.WaveSpec{Type: testWaves[i%len(testWaves)], Freq: &f, AmpVpp: &amp, Offset: &zero}
+		if err := CheckGenLimits(b, g.alias, w, savedGen[g]); err != nil {
+			return nil, nil, domain.Usagef("wiring test signal on %s:CH%d: %v", g.alias, g.ch, err)
+		}
 	}
 	savedCh := map[chanKey]domain.ChannelState{}
 	savedTB := map[string]domain.Timebase{}
@@ -485,7 +530,7 @@ func (a *App) verifyDMMLink(ctx context.Context, c *conns, b *domain.Bench, getG
 		exp = &domain.Expect{Function: "vdc", Value: dcTestLevel, Tolerance: "5%"}
 	}
 	if exp == nil {
-		chk.OK, chk.Method = true, "none"
+		chk.Method = methodNone
 		chk.Observed = "no expectation configured; add \"expect\" to the link to verify it"
 		return chk, nil
 	}
@@ -499,6 +544,11 @@ func (a *App) verifyDMMLink(ctx context.Context, c *conns, b *domain.Bench, getG
 	}
 
 	if drive {
+		// The generator drives exp.Value as a DC level, which only means
+		// something for a DC voltage reading.
+		if fn != "vdc" {
+			return chk, domain.Usagef("link %s → %s: a generator → DMM link can only be checked with function vdc, not %s", l.From, l.To, fn)
+		}
 		ch, err := from.ChannelNumber()
 		if err != nil {
 			return chk, domain.Usagef("link %s → %s: %v", l.From, l.To, err)
@@ -511,6 +561,10 @@ func (a *App) verifyDMMLink(ctx context.Context, c *conns, b *domain.Bench, getG
 		if err != nil {
 			return chk, err
 		}
+		lvl := exp.Value
+		if err := CheckGenLimits(b, from.Alias, domain.WaveSpec{Type: "dc", Offset: &lvl}, saved); err != nil {
+			return chk, domain.Usagef("link %s → %s: DC test level: %v", l.From, l.To, err)
+		}
 		defer func() {
 			rctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
@@ -520,7 +574,6 @@ func (a *App) verifyDMMLink(ctx context.Context, c *conns, b *domain.Bench, getG
 				a.warnf("restore %s:CH%d: %v", from.Alias, ch, e)
 			}
 		}()
-		lvl := exp.Value
 		if err := gen.SetLoad(ctx, ch, "hiz"); err != nil {
 			return chk, err
 		}

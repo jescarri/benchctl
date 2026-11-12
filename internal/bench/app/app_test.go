@@ -222,6 +222,20 @@ func TestApplyErrors(t *testing.T) {
 	if _, err := a.Apply(context.Background(), p, "."); err == nil || !strings.Contains(err.Error(), "max_amp_vpp") {
 		t.Fatalf("limit: %v", err)
 	}
+	// A misspelled step key must fail, not silently drop the assertion.
+	for _, step := range []string{
+		`scope.measure: {ch: 1, params: [pkpk], expects: {pkpk: "1 ± 3%"}}`,
+		`fg.set: {ch: 1, amplitude: 5Vpp}`,
+		`scope.autoset: {alais: scope}`,
+	} {
+		p, err := LoadPlan(strings.NewReader("steps:\n  - " + step + "\n"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := a.Apply(context.Background(), p, "."); domain.KindOf(err) != domain.KindUsage || !strings.Contains(err.Error(), "not found") {
+			t.Fatalf("%s: %v", step, err)
+		}
+	}
 	for _, bad := range []string{"", "steps: []", "steps:\n  - {a: 1, b: 2}\n", "bogus: 1\nsteps:\n  - wait: 1s\n"} {
 		if _, err := LoadPlan(strings.NewReader(bad)); err == nil {
 			t.Errorf("plan %q should be rejected", bad)
@@ -332,6 +346,15 @@ func TestPeakFrequency(t *testing.T) {
 	if PeakFrequency(v[:4], dt) != 0 {
 		t.Fatal("too short")
 	}
+	// A record longer than the FFT cap is decimated, not truncated to its
+	// start, and still finds the peak.
+	long := make([]float64, 3<<20)
+	for i := range long {
+		long[i] = math.Sin(2 * math.Pi * 1000 * float64(i) * 1e-7)
+	}
+	if f := PeakFrequency(long, 1e-7); math.Abs(f-1000)/1000 > 0.01 {
+		t.Fatalf("long record peak %v", f)
+	}
 }
 
 func TestParseExpectation(t *testing.T) {
@@ -430,6 +453,19 @@ func TestStatusAndSafe(t *testing.T) {
 	if err != nil || len(sr) != 1 || sr[0].Action != "all outputs off" || b.Gens["fg"].Ch(1).Output {
 		t.Fatalf("%+v %v", sr, err)
 	}
+	// An unreachable generator is not confirmed off: safe must not succeed.
+	b.OpenErrs["fg"] = domain.Unreachablef("down")
+	sr, err = a.Safe(context.Background())
+	if domain.KindOf(err) != domain.KindUnreachable || len(sr) != 1 || sr[0].Action != "unreachable" {
+		t.Fatalf("unreachable generator: %+v %v", sr, err)
+	}
+	delete(b.OpenErrs, "fg")
+	// Any open failure fails status, not only unreachable ones.
+	b.OpenErrs["dmm"] = domain.Instrumentf("locked")
+	if _, err := a.Status(context.Background(), nil); domain.KindOf(err) != domain.KindInstrument {
+		t.Fatalf("status with locked dmm: %v", err)
+	}
+	delete(b.OpenErrs, "dmm")
 	if c, err := a.Caps("scope"); err != nil || c.Channels != 4 {
 		t.Fatalf("%+v %v", c, err)
 	}
@@ -603,5 +639,51 @@ func TestWiringVerifyProbeFactorMismatch(t *testing.T) {
 	_, err := a.WiringVerify(context.Background(), nil)
 	if err == nil || !strings.Contains(err.Error(), "probe factor is 10X") || strings.Contains(err.Error(), "50 Ω") {
 		t.Fatalf("got %v", err)
+	}
+}
+
+func TestWiringVerifyGuards(t *testing.T) {
+	ctx := context.Background()
+	// Only unchecked links: nothing was verified, so it must not pass.
+	a, _, _, _ := rig(t, straight)
+	rep, err := a.WiringVerify(ctx, []domain.Link{{From: "ext:5V", To: "dmm:V"}})
+	if domain.KindOf(err) != domain.KindVerify || rep.OK || len(rep.Unchecked) != 1 || len(rep.Links) != 0 {
+		t.Fatalf("unchecked only: %+v %v", rep, err)
+	}
+	// A typo in a destination alias is an error, an explicit dut is not.
+	if _, err := a.WiringVerify(ctx, []domain.Link{{From: "fg:CH1", To: "scop:C1"}}); domain.KindOf(err) != domain.KindUsage {
+		t.Fatalf("unknown destination: %v", err)
+	}
+	rep, err = a.WiringVerify(ctx, []domain.Link{{From: "fg:CH1", To: "scope:C1"}, {From: "fg:CH2", To: "dut:IN"}})
+	if err != nil || !rep.OK || len(rep.Unchecked) != 1 {
+		t.Fatalf("dut link: %+v %v", rep, err)
+	}
+	// A generator → DMM link can only drive a DC voltage check.
+	vac := []domain.Link{{From: "fg:CH1", To: "dmm:V", Expect: &domain.Expect{Function: "vac", Value: 1, Tolerance: "5%"}}}
+	if _, err := a.WiringVerify(ctx, vac); domain.KindOf(err) != domain.KindUsage {
+		t.Fatalf("vac drive: %v", err)
+	}
+}
+
+func TestWiringVerifyRespectsLimits(t *testing.T) {
+	ctx := context.Background()
+	a, b, store, _ := rig(t, straight)
+	store.B.Limits = map[string]map[string]any{"fg": {"max_abs_v": 2.0}}
+	five := []domain.Link{{From: "fg:CH1", To: "dmm:V", Expect: &domain.Expect{Function: "vdc", Value: 5, Tolerance: "5%"}}}
+	if _, err := a.WiringVerify(ctx, five); domain.KindOf(err) != domain.KindUsage || !strings.Contains(err.Error(), "max_abs_v") {
+		t.Fatalf("5 V DC over a 2 V limit: %v", err)
+	}
+	if st := b.Gens["fg"].Ch(1); st.Output || st.Offset == 5 {
+		t.Fatalf("generator touched: %+v", st)
+	}
+	// The 1 Vpp scope test signal peaks at 0.5 V.
+	store.B.Limits = map[string]map[string]any{"fg": {"max_abs_v": 0.2}}
+	if _, err := a.WiringVerify(ctx, nil); domain.KindOf(err) != domain.KindUsage || !strings.Contains(err.Error(), "test signal") {
+		t.Fatalf("test signal over limit: %v", err)
+	}
+	// An invalid limit is a config error, not "no limit".
+	store.B.Limits = map[string]map[string]any{"fg": {"max_amp_vpp": "5volts"}}
+	if _, err := a.FGSet(ctx, FGSetRequest{Alias: "fg", Channel: 1, Wave: domain.WaveSpec{AmpVpp: ptr(1.0)}}); domain.KindOf(err) != domain.KindUsage {
+		t.Fatalf("invalid limit: %v", err)
 	}
 }

@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -48,6 +50,13 @@ func screenshotCmd(e *env) *cli.Command {
 
 func (e *env) screenshots(ctx context.Context, c *cli.Command, aliases []string) error {
 	stamp := time.Now().Format("20060102-150405")
+	// Generated names (no -o, or -o dir) never replace an existing file, and
+	// no file written in this run is replaced (e.g. the same alias twice).
+	generated := c.String("output") == ""
+	if st, err := os.Stat(c.String("output")); err == nil && st.IsDir() {
+		generated = true
+	}
+	written := map[string]bool{}
 	var out []shotResult
 	for _, alias := range aliases {
 		path, format, err := shotPath(c.String("output"), c.String("format"), alias, stamp, len(aliases) > 1)
@@ -68,15 +77,47 @@ func (e *env) screenshots(ctx context.Context, c *cli.Command, aliases []string)
 				return domain.Instrumentf("%s: convert to PNG: %v", alias, err)
 			}
 		}
-		if err := os.WriteFile(path, data, 0o644); err != nil {
+		if generated || written[path] {
+			path, err = writeNew(path, data)
+		} else {
+			err = os.WriteFile(path, data, 0o644)
+		}
+		if err != nil {
 			return domain.Usagef("%v", err)
 		}
+		written[path] = true
 		out = append(out, shotResult{Alias: alias, File: path, Format: format, Bytes: len(data), Width: info.Width, Height: info.Height})
 	}
 	return e.emit(out)
 }
 
 // shotPath resolves the output path and format for one alias.
+// writeNew writes data to path, or to path-2, path-3, ... if it exists, and
+// returns the name used. O_EXCL makes it safe against concurrent runs.
+func writeNew(path string, data []byte) (string, error) {
+	ext := filepath.Ext(path)
+	stem := strings.TrimSuffix(path, ext)
+	for i := 1; i < 1000; i++ {
+		p := path
+		if i > 1 {
+			p = fmt.Sprintf("%s-%d%s", stem, i, ext)
+		}
+		f, err := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		if errors.Is(err, fs.ErrExist) {
+			continue
+		}
+		if err != nil {
+			return "", err
+		}
+		if _, err := f.Write(data); err != nil {
+			_ = f.Close()
+			return "", err
+		}
+		return p, f.Close()
+	}
+	return "", fmt.Errorf("no free file name for %s", path)
+}
+
 func shotPath(output, format, alias, stamp string, many bool) (string, string, error) {
 	format = strings.ToLower(format)
 	if format != "" && format != "png" && format != "bmp" {

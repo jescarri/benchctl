@@ -4,6 +4,7 @@ package sdg1000x
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/jescarri/benchctl/internal/bench/adapter/scpi"
@@ -51,6 +52,10 @@ var waveTypes = map[string]string{
 func (g *Generator) SetWave(ctx context.Context, ch int, w domain.WaveSpec) error {
 	if err := base.CheckChannel(ch, g.channels); err != nil {
 		return err
+	}
+	// The SDG wraps an out-of-range phase (400° applies 40°), so reject it.
+	if w.Phase != nil && (*w.Phase < 0 || *w.Phase > 360 || math.IsNaN(*w.Phase)) {
+		return domain.Usagef("phase %g° out of range (0..360)", *w.Phase)
 	}
 	p := fmt.Sprintf("C%d:BSWV ", ch)
 	if w.Type != "" {
@@ -101,6 +106,12 @@ func (g *Generator) SetWave(ctx context.Context, ch int, w domain.WaveSpec) erro
 		}
 		if err := check("amplitude rms", w.AmpRMS, st.AmpRMS, 0.01, 1e-3); err != nil {
 			return err
+		}
+		if w.Phase != nil {
+			d := math.Mod(math.Abs(*w.Phase-st.Phase), 360)
+			if math.Min(d, 360-d) > 0.1 {
+				return domain.Instrumentf("phase: requested %g° but instrument applied %g°", *w.Phase, st.Phase)
+			}
 		}
 	}
 	if err := check("offset", w.Offset, st.Offset, 0.01, 2e-3); err != nil {
@@ -220,9 +231,30 @@ func ParseBSWV(r string) (domain.GenChannelState, error) {
 		st.Raw[f[i]] = f[i+1]
 	}
 	st.Wave = strings.ToLower(st.Raw["WVTP"])
+	// A field that is absent for this wave (e.g. FRQ on DC) reads as zero, but
+	// one that is present and invalid ("****") is an error: limit checks use
+	// these values, and a zero amplitude would let an offset pass that is
+	// over max_abs_v.
+	var perr error
 	num := func(k string) float64 {
-		v, _, _ := domain.ParseInstrumentNumber(st.Raw[k])
+		raw, ok := st.Raw[k]
+		if !ok {
+			return 0
+		}
+		v, valid, err := domain.ParseInstrumentNumber(raw)
+		if (err != nil || !valid) && perr == nil {
+			perr = base.Errf("BSWV?: invalid %s %q in %q", k, raw, r)
+		}
 		return v
+	}
+	required := []string{"OFST"}
+	if st.Wave != "dc" && st.Wave != "noise" {
+		required = append(required, "AMP")
+	}
+	for _, k := range required {
+		if _, ok := st.Raw[k]; !ok {
+			return st, base.Errf("BSWV?: %s missing for %s in %q", k, st.Wave, r)
+		}
 	}
 	st.Freq = num("FRQ")
 	st.AmpVpp = num("AMP")
@@ -235,7 +267,7 @@ func ParseBSWV(r string) (domain.GenChannelState, error) {
 		d := num("DUTY")
 		st.Duty = &d
 	}
-	return st, nil
+	return st, perr
 }
 
 // ParseOUTP parses "C1:OUTP OFF,LOAD,HZ,PLRT,NOR" into st.

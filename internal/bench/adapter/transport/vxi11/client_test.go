@@ -19,6 +19,7 @@ type fakeServer struct {
 	pm, core, ab   net.Listener
 	maxRecv        uint32
 	advertiseAbort bool
+	refuseIntr     bool // create_intr_chan fails (operation not supported)
 	readChunk      int  // max bytes per device_read reply (0 = unlimited)
 	fragment       bool // split replies into two RPC fragments
 	respond        func(cmd string) []byte
@@ -202,6 +203,10 @@ func (f *fakeServer) handle(prog, proc uint32, d *xdrDec) []byte {
 			p := d.u32()
 			if d.u32() != progIntr {
 				e.i32(5)
+				break
+			}
+			if f.refuseIntr {
+				e.i32(8)
 				break
 			}
 			f.intrAddr = net.JoinHostPort(ip.String(), fmt.Sprint(p))
@@ -479,5 +484,24 @@ func TestSRQSilentInstrument(t *testing.T) {
 	defer cancel()
 	if err := c.WaitSRQ(ctx); err == nil || c.SRQConnections() != 0 {
 		t.Fatalf("expected timeout with no connection, got %v (%d conns)", err, c.SRQConnections())
+	}
+}
+
+func TestWaitSRQAfterFailedEnable(t *testing.T) {
+	f := newFake(t)
+	f.refuseIntr = true
+	c, err := f.dial(t, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = c.Close() }()
+	if err := c.EnableSRQ(ctx2s(t)); err == nil {
+		t.Fatal("EnableSRQ must fail when create_intr_chan is refused")
+	}
+	// Must report "not established" at once, not block until the deadline.
+	start := time.Now()
+	err = c.WaitSRQ(ctx2s(t))
+	if !IsCode(err, 6) || time.Since(start) > time.Second {
+		t.Fatalf("WaitSRQ after failed enable: %v after %v", err, time.Since(start))
 	}
 }

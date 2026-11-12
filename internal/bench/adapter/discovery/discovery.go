@@ -100,6 +100,14 @@ func (s *Scanner) Scan(ctx context.Context, cidr string) ([]port.Found, error) {
 	return found, ctx.Err()
 }
 
+// ScanTransport is Scan with the raw socket probed as well when raw is true
+// (rediscovery of an instrument configured for raw).
+func (s *Scanner) ScanTransport(ctx context.Context, cidr string, raw bool) ([]port.Found, error) {
+	c := *s
+	c.Raw = s.Raw || raw
+	return c.Scan(ctx, cidr)
+}
+
 func (s *Scanner) probe(ctx context.Context, ip string, pnum int) (port.Found, bool) {
 	ct := s.ConnectTimeout
 	if ct == 0 {

@@ -125,6 +125,7 @@ func (a *App) Status(ctx context.Context, aliases []string) ([]InstrumentStatus,
 	defer c.closeAll()
 	var out []InstrumentStatus
 	unreachable := 0
+	var firstErr error
 	for _, alias := range aliases {
 		st := InstrumentStatus{Alias: alias}
 		inst, err := c.get(ctx, alias)
@@ -132,6 +133,8 @@ func (a *App) Status(ctx context.Context, aliases []string) ([]InstrumentStatus,
 			st.Error = err.Error()
 			if domain.KindOf(err) == domain.KindUnreachable {
 				unreachable++
+			} else if firstErr == nil {
+				firstErr = err
 			}
 			out = append(out, st)
 			continue
@@ -148,7 +151,9 @@ func (a *App) Status(ctx context.Context, aliases []string) ([]InstrumentStatus,
 	if unreachable > 0 {
 		return out, domain.Unreachablef("%d of %d instruments unreachable", unreachable, len(aliases))
 	}
-	return out, nil
+	// Other open failures (unknown alias, lock timeout, serial mismatch)
+	// must not exit 0 either.
+	return out, firstErr
 }
 
 func snapshot(ctx context.Context, inst port.Instrument) (any, error) {

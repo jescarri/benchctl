@@ -28,7 +28,10 @@ func newApp(t *testing.T, transport string) *app.App {
 	t.Helper()
 	store := config.New(os.Getenv("BENCHCTL_CONFIG"))
 	b, err := store.Load()
-	if err != nil || len(b.Instruments) == 0 {
+	if err != nil {
+		t.Fatalf("inventory %s: %v", store.Path(), err) // a broken inventory must not look like a pass
+	}
+	if len(b.Instruments) == 0 {
 		t.Skip("no inventory; run `benchctl discover --save`")
 	}
 	var trace io.Writer
@@ -40,6 +43,18 @@ func newApp(t *testing.T, transport string) *app.App {
 		Store: store, Scanner: scanner, RoleOf: siglent.RoleFor, Warn: os.Stderr,
 		Connector: &connect.Connector{Store: store, Discoverer: scanner, Transport: transport,
 			Log: os.Stderr, Trace: trace, LockWait: 5 * time.Second, IOTimeout: 5 * time.Second},
+	}
+}
+
+// mustSafe switches every output off and fails the test unless each one is
+// confirmed off (an unreachable generator does not count).
+func mustSafe(t *testing.T, a *app.App) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	r, err := a.Safe(ctx)
+	if err != nil {
+		t.Errorf("safe: outputs not confirmed off: %v (%+v)", err, r)
 	}
 }
 
@@ -73,7 +88,7 @@ func TestFGToScope(t *testing.T) {
 			a := newApp(t, tr)
 			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 			defer cancel()
-			defer func() { _, _ = a.Safe(context.Background()) }()
+			defer mustSafe(t, a)
 
 			w, _ := app.WaveSpecFromStrings("sine", "1k", "1Vpp", "0", "0", "")
 			if _, err := a.FGSet(ctx, app.FGSetRequest{Channel: 1, Wave: w, Load: "hiz"}); err != nil {
@@ -168,7 +183,7 @@ func TestTriggerDelayTimeAxis(t *testing.T) {
 	a := newApp(t, "")
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
-	defer func() { _, _ = a.Safe(context.Background()) }()
+	defer mustSafe(t, a)
 	defer func() { _, _ = a.ScopeTimebase(context.Background(), "", nil, f(0)) }()
 
 	w, _ := app.WaveSpecFromStrings("sine", "1k", "1Vpp", "0", "0", "")
@@ -263,7 +278,7 @@ func TestAutoset(t *testing.T) {
 	a := newApp(t, "")
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
-	defer func() { _, _ = a.Safe(context.Background()) }()
+	defer mustSafe(t, a)
 	w, _ := app.WaveSpecFromStrings("sine", "1k", "1Vpp", "0", "0", "")
 	if _, err := a.FGSet(ctx, app.FGSetRequest{Channel: 1, Wave: w, Load: "hiz"}); err != nil {
 		t.Fatal(err)

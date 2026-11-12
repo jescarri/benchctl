@@ -201,6 +201,8 @@ func (a *App) Safe(ctx context.Context) ([]SafeResult, error) {
 func (a *App) safeWith(ctx context.Context, c *conns, b *domain.Bench) ([]SafeResult, error) {
 	var out []SafeResult
 	var firstErr error
+	var unconfirmed []string // outputs not confirmed off
+	unreachable := false
 	for _, alias := range b.Aliases() {
 		ref := b.Instruments[alias]
 		role := a.roleOf(ref.Model)
@@ -211,12 +213,15 @@ func (a *App) safeWith(ctx context.Context, c *conns, b *domain.Bench) ([]SafeRe
 		inst, err := c.get(ctx, alias)
 		if err != nil {
 			r.Action, r.Error = "unreachable", err.Error()
+			unconfirmed = append(unconfirmed, alias)
+			unreachable = unreachable || domain.KindOf(err) == domain.KindUnreachable
 			out = append(out, r)
 			continue
 		}
 		o, ok := inst.(port.Outputs)
 		if !ok {
 			r.Action = "no output control in driver"
+			unconfirmed = append(unconfirmed, alias)
 			out = append(out, r)
 			continue
 		}
@@ -229,6 +234,14 @@ func (a *App) safeWith(ctx context.Context, c *conns, b *domain.Bench) ([]SafeRe
 			r.Action = "all outputs off"
 		}
 		out = append(out, r)
+	}
+	if firstErr == nil && len(unconfirmed) > 0 {
+		// An output that could not be switched off is not safe: never exit 0.
+		msg := fmt.Sprintf("outputs not confirmed off on %s", strings.Join(unconfirmed, ", "))
+		if unreachable {
+			return out, domain.Unreachablef("%s", msg)
+		}
+		return out, domain.Instrumentf("%s", msg)
 	}
 	return out, firstErr
 }

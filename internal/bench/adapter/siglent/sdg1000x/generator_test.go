@@ -29,6 +29,19 @@ func TestParseBSWV(t *testing.T) {
 	if _, err := ParseBSWV("C1:BSWV WVTP"); err == nil {
 		t.Fatal("odd field count must fail")
 	}
+	// An invalid or missing amplitude must not read as 0 V.
+	for _, bad := range []string{
+		"C1:BSWV WVTP,SINE,FRQ,1000HZ,AMP,****,OFST,0V",
+		"C1:BSWV WVTP,SINE,FRQ,1000HZ,AMP,4volts,OFST,0V",
+		"C1:BSWV WVTP,SINE,FRQ,1000HZ,OFST,0V",
+	} {
+		if _, err := ParseBSWV(bad); err == nil {
+			t.Errorf("%s: want error", bad)
+		}
+	}
+	if st, err := ParseBSWV("C1:BSWV WVTP,DC,OFST,1.5V"); err != nil || st.Offset != 1.5 {
+		t.Fatalf("dc: %+v %v", st, err)
+	}
 }
 
 func TestParseOUTP(t *testing.T) {
@@ -49,6 +62,7 @@ type sim struct {
 	wave       [3]string
 	frq, amp   [3]float64
 	ofst, duty [3]float64
+	phse       [3]float64
 	out        [3]bool
 	load       [3]string
 	errs       []string
@@ -79,7 +93,7 @@ func (s *sim) handle(cmd string) (string, bool) {
 	hdr, arg, _ := strings.Cut(cmd[3:], " ")
 	switch hdr {
 	case "BSWV?":
-		r := fmt.Sprintf("C%d:BSWV WVTP,%s,FRQ,%gHZ,AMP,%gV,AMPVRMS,%gVrms,OFST,%gV,PHSE,0", ch, s.wave[ch], s.frq[ch], s.amp[ch], s.amp[ch]/2/math.Sqrt2, s.ofst[ch])
+		r := fmt.Sprintf("C%d:BSWV WVTP,%s,FRQ,%gHZ,AMP,%gV,AMPVRMS,%gVrms,OFST,%gV,PHSE,%g", ch, s.wave[ch], s.frq[ch], s.amp[ch], s.amp[ch]/2/math.Sqrt2, s.ofst[ch], s.phse[ch])
 		if s.wave[ch] == "SQUARE" {
 			r += fmt.Sprintf(",DUTY,%g", s.duty[ch])
 		}
@@ -101,6 +115,8 @@ func (s *sim) handle(cmd string) (string, bool) {
 				s.ofst[ch] = v
 			case "DUTY":
 				s.duty[ch] = v
+			case "PHSE":
+				s.phse[ch] = math.Mod(v, 360) // the SDG wraps: 400 → 40
 			case "AMPVRMS":
 				s.amp[ch] = v * 2 * math.Sqrt2
 			default:
@@ -153,6 +169,15 @@ func TestSetWaveAndReadBack(t *testing.T) {
 	}
 	if err := g.SetWave(ctx, 1, domain.WaveSpec{AmpRMS: f(1)}); err != nil {
 		t.Fatalf("Vrms: %v", err)
+	}
+	if err := g.SetWave(ctx, 1, domain.WaveSpec{Phase: f(90)}); err != nil {
+		t.Fatalf("phase 90: %v", err)
+	}
+	// 400° would be applied as 40°: refuse it rather than report success.
+	for _, ph := range []float64{400, -10} {
+		if err := g.SetWave(ctx, 1, domain.WaveSpec{Phase: f(ph)}); domain.KindOf(err) != domain.KindUsage {
+			t.Fatalf("phase %g: %v", ph, err)
+		}
 	}
 	if err := g.SetWave(ctx, 1, domain.WaveSpec{Type: "triangle"}); domain.KindOf(err) != domain.KindUsage {
 		t.Fatalf("unknown wave: %v", err)

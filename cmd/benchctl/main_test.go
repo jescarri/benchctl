@@ -131,6 +131,31 @@ func TestShotPath(t *testing.T) {
 	}
 }
 
+func TestOutputFlagsNeedSomethingToSave(t *testing.T) {
+	cfg := "--config=" + filepath.Join(t.TempDir(), "bench.json")
+	for _, args := range [][]string{
+		{cfg, "raw", "fg", "*CLS", "-o", filepath.Join(t.TempDir(), "x.txt")},
+		{cfg, "scope", "capture", "1", "--raw"},
+	} {
+		if code, _, _ := runCLI(t, args...); code != 2 {
+			t.Errorf("%v: exit %d, want 2", args, code)
+		}
+	}
+}
+
+func TestWriteNewNeverReplaces(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "scope-T.png")
+	for i, want := range []string{p, strings.TrimSuffix(p, ".png") + "-2.png", strings.TrimSuffix(p, ".png") + "-3.png"} {
+		got, err := writeNew(p, []byte{byte(i)})
+		if err != nil || got != want {
+			t.Fatalf("write %d: %q %v, want %q", i, got, err, want)
+		}
+	}
+	if b, _ := os.ReadFile(p); len(b) != 1 || b[0] != 0 {
+		t.Fatalf("first file replaced: %v", b)
+	}
+}
+
 func TestConfirmWiring(t *testing.T) {
 	steps := []app.WiringStep{{Step: 1, Instruction: "Connect fg CH1 → scope C1"}}
 	for in, ok := range map[string]bool{"y\n": true, "YES\n": true, "n\n": false, "": false, "maybe\n": false} {

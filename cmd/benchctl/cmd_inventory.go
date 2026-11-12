@@ -66,7 +66,7 @@ func capsCmd(e *env) *cli.Command {
 func safeCmd(e *env) *cli.Command {
 	return &cli.Command{
 		Name:  "safe",
-		Usage: "switch off every output on every reachable instrument",
+		Usage: "switch off every output on every instrument (non-zero exit if any is not confirmed off)",
 		Action: func(ctx context.Context, c *cli.Command) error {
 			r, err := e.app.Safe(ctx)
 			return e.emitPartial(r, err)
@@ -113,7 +113,7 @@ func wiringCmd(e *env) *cli.Command {
 						}
 					}
 					r, err := e.app.WiringVerify(ctx, links)
-					if r.Links == nil {
+					if r.Links == nil && r.Unchecked == nil {
 						return err
 					}
 					return e.emitPartial(r, err)

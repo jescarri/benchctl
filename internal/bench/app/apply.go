@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -214,7 +215,15 @@ func decodeStep(n *yaml.Node, v any) error {
 	if n.Kind == 0 || (n.Kind == yaml.ScalarNode && n.Value == "") {
 		return nil
 	}
-	return n.Decode(v)
+	// yaml.Node.Decode ignores unknown keys; a misspelled key such as
+	// "expects:" would silently drop the assertions, so decode strictly.
+	raw, err := yaml.Marshal(n)
+	if err != nil {
+		return err
+	}
+	dec := yaml.NewDecoder(bytes.NewReader(raw))
+	dec.KnownFields(true)
+	return dec.Decode(v)
 }
 
 // Apply runs a plan. Outputs are switched off (safe) if any step fails, the
@@ -442,7 +451,13 @@ func (a *App) runStep(ctx context.Context, c *conns, b *domain.Bench, action str
 		return t, nil, err
 
 	case "scope.autoset":
-		alias, err := a.alias("", domain.RoleScope)
+		var st struct {
+			Alias string `yaml:"alias"`
+		}
+		if err := decodeStep(n, &st); err != nil {
+			return nil, nil, domain.Usagef("scope.autoset: %v", err)
+		}
+		alias, err := a.alias(st.Alias, domain.RoleScope)
 		if err != nil {
 			return nil, nil, err
 		}

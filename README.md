@@ -88,7 +88,9 @@ benchctl script fg examples/sdg-burst.scpi
 The inventory is `~/.config/benchctl/bench.json` (`--config` / `BENCHCTL_CONFIG`). It holds
 instruments (serial, model, last IP, optional `transport`), `wiring` (links can include an
 `expect` reading for external sources) and `limits` (`fg.max_amp_vpp`, `fg.max_abs_v`,
-`fg.max_freq_hz`), which are enforced before anything is sent.
+`fg.max_freq_hz`). They are checked before anything is sent by `fg set`, `apply` `fg.set` steps
+and the `wiring verify` test signals. **`raw`, `script` and `raw` plan steps send SCPI as given and
+bypass these limits.** An invalid limit value (e.g. `"5volts"`) is a config error, not "no limit".
 
 Global flags: `--timeout` (per SCPI operation, default 5s), `--transport auto|vxi11|raw` (`auto` = VXI-11 only; a VXI-11 failure tells you to retry with `raw`),
 `--ip`, `--verbose` (SCPI trace on stderr), `--lock-wait`.

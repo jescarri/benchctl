@@ -135,12 +135,35 @@ func ParseInstrumentNumber(s string) (v float64, ok bool, err error) {
 	if err != nil {
 		return 0, false, err
 	}
-	// Siglent sometimes appends SI-prefixed units ("700K", "14M"); honour a bare prefix.
-	rest := s[n:]
-	if mult, okp := siPrefix[rest]; okp {
-		v *= mult
+	mult, err := instrumentSuffix(strings.TrimSpace(s[n:]))
+	if err != nil {
+		return 0, false, fmt.Errorf("%q: %w", s, err)
 	}
-	return v, true, nil
+	return v * mult, true, nil
+}
+
+// instrumentSuffix returns the multiplier for what an instrument appends to a
+// number: nothing, a bare SI prefix ("700K", "14M"), a unit ("V", "HZ",
+// "Sa/s") or a prefixed unit ("700mV", "1.00GSa/s"). Anything else is an
+// error, so a misread suffix never yields a number off by a factor of 1000.
+func instrumentSuffix(rest string) (float64, error) {
+	if rest == "" {
+		return 1, nil
+	}
+	if _, ok := knownUnits[strings.ToLower(rest)]; ok {
+		return 1, nil
+	}
+	if mult, ok := siPrefix[rest]; ok {
+		return mult, nil
+	}
+	for p, mult := range siPrefix {
+		if u, ok := strings.CutPrefix(rest, p); ok && u != "" {
+			if _, ok := knownUnits[strings.ToLower(u)]; ok {
+				return mult, nil
+			}
+		}
+	}
+	return 0, fmt.Errorf("unrecognized unit suffix %q", rest)
 }
 
 // Tolerance is an absolute or relative tolerance such as "0.05" or "3%".
@@ -154,7 +177,7 @@ func ParseTolerance(s string) (Tolerance, error) {
 	s = strings.TrimSpace(s)
 	if strings.HasSuffix(s, "%") {
 		v, err := strconv.ParseFloat(strings.TrimSuffix(s, "%"), 64)
-		if err != nil {
+		if err != nil || math.IsInf(v, 0) || math.IsNaN(v) || v < 0 {
 			return Tolerance{}, fmt.Errorf("invalid tolerance %q", s)
 		}
 		return Tolerance{Value: v / 100, Relative: true}, nil
@@ -162,6 +185,9 @@ func ParseTolerance(s string) (Tolerance, error) {
 	q, err := ParseQuantity(s)
 	if err != nil {
 		return Tolerance{}, fmt.Errorf("invalid tolerance %q: %w", s, err)
+	}
+	if math.IsInf(q.Value, 0) || math.IsNaN(q.Value) {
+		return Tolerance{}, fmt.Errorf("invalid tolerance %q", s)
 	}
 	return Tolerance{Value: math.Abs(q.Value)}, nil
 }

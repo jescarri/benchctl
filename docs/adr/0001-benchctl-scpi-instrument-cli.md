@@ -309,7 +309,12 @@ The agent can't see the bench, so every wiring instruction is checked electrical
 4. For the DMM, it applies a known DC level from the FG with output on and the DMM in VDC,
    and checks the reading is within tolerance. A link from a non-instrument source (e.g.
    `ext:5V`, a bench PSU) is checked against its `expect` reading.
-5. `apply` runs step 3–4 on the plan's `wiring:` before step 1 (`verify_wiring: false` to
+5. Links that cannot be checked electrically (to `ext:` or `dut:` endpoints, or a DMM link
+   without `expect`) are listed under `unchecked` and never count as verified; a report with
+   no checked link fails (exit 4). Any other unknown destination alias is a usage error (a
+   typo must not pass). Test signals and DC test levels are checked against the bench limits
+   before any output changes, and a generator → DMM link can only use `vdc`.
+6. `apply` runs step 3–5 on the plan's `wiring:` before step 1 (`verify_wiring: false` to
    skip) and runs no step if it fails.
 
 `benchctl ping` is the plain connection test: it opens each instrument the normal way
@@ -321,8 +326,11 @@ reports the transport and SRQ status.
 - FG outputs, and later PSU outputs, are **never enabled implicitly**. `output on` is an
   explicit command, and `apply` plans must state it.
 - Per-instrument limits live in `bench.json` (e.g. `fg.max_amp_vpp`, `psu.max_v`,
-  `psu.max_i`). The CLI refuses values over a limit before sending anything.
-- `benchctl safe` turns all outputs off on every reachable instrument. Plans run it in a
+  `psu.max_i`). The CLI refuses values over a limit before sending anything. An invalid limit
+  value is a config error when the inventory loads, never "no limit". `raw`, `script` and
+  `raw` plan steps send SCPI unchecked and bypass the limits.
+- `benchctl safe` turns all outputs off on every instrument, and exits non-zero (3 if
+  unreachable, else 1) when any output is not confirmed off. Plans run it in a
   deferred step (on failure and on SIGINT).
 - Load mismatch warning: if FG load is `50` but the scope coupling is `D1M`, warn that the
   amplitude will read 2× the setting (and the reverse).

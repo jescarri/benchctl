@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -210,5 +212,40 @@ func TestTracerAndSummarize(t *testing.T) {
 	}
 	if !strings.Contains(scpi.Summarize([]byte{0, 1, 2, 0xff}), "4 bytes binary") {
 		t.Error("binary summary")
+	}
+}
+
+func TestFileLockRefusesUnsafePaths(t *testing.T) {
+	ctx := context.Background()
+	// A symlinked lock file must not be followed (its target would be truncated).
+	dir := t.TempDir()
+	target := filepath.Join(t.TempDir(), "precious")
+	if err := os.WriteFile(target, []byte("keep me"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(dir, "SN1.lock")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := scpi.AcquireFileLock(ctx, dir, "SN1", 0); err == nil {
+		t.Fatal("followed a symlinked lock file")
+	}
+	if b, _ := os.ReadFile(target); string(b) != "keep me" {
+		t.Fatalf("target modified: %q", b)
+	}
+	// A group/world-writable lock directory is refused.
+	open := t.TempDir()
+	if err := os.Chmod(open, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := scpi.AcquireFileLock(ctx, open, "SN1", 0); err == nil {
+		t.Fatal("accepted a world-writable lock directory")
+	}
+	// A symlinked lock directory is refused.
+	link := filepath.Join(t.TempDir(), "lockdir")
+	if err := os.Symlink(t.TempDir(), link); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := scpi.AcquireFileLock(ctx, link, "SN1", 0); err == nil {
+		t.Fatal("accepted a symlinked lock directory")
 	}
 }

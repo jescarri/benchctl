@@ -34,6 +34,7 @@ func TestParseCONF(t *testing.T) {
 type sim struct {
 	conf, rangeAuto, read string
 	errs                  []string
+	stuckAuto             bool // manual range commands leave autoranging on
 }
 
 func (s *sim) handle(cmd string) (string, bool) {
@@ -55,6 +56,9 @@ func (s *sim) handle(cmd string) (string, bool) {
 		s.conf, s.rangeAuto = `"VOLT +6.00000000E+00"`, "1"
 	case cmd == "CONF:VOLT:DC 5.000000E+00":
 		s.conf, s.rangeAuto = `"VOLT +6.00000000E+00"`, "0" // coerced up
+		if s.stuckAuto {
+			s.rangeAuto = "1"
+		}
 	case cmd == "CONF:VOLT:DC 1.000000E+04":
 		s.conf, s.rangeAuto = `"VOLT +1.00000000E+03"`, "0" // max range
 	case cmd == "CONF:DIOD":
@@ -90,6 +94,15 @@ func TestConfigureAndRead(t *testing.T) {
 	if err := d.Configure(ctx, domain.DMMConfig{Function: "vdc", Range: "10k"}); err == nil {
 		t.Fatal("range below request must fail")
 	}
+	if err := d.Configure(ctx, domain.DMMConfig{Function: "vdc", Range: "600mA"}); domain.KindOf(err) != domain.KindUsage {
+		t.Fatalf("current unit on a voltage range: %v", err)
+	}
+	// A manual range the DMM leaves on autoranging is not applied.
+	s.stuckAuto = true
+	if err := d.Configure(ctx, domain.DMMConfig{Function: "vdc", Range: "5"}); err == nil || !strings.Contains(err.Error(), "autoranging is still on") {
+		t.Fatalf("stuck auto: %v", err)
+	}
+	s.stuckAuto = false
 	if err := d.Configure(ctx, domain.DMMConfig{Function: "diode"}); err != nil {
 		t.Fatal(err)
 	}

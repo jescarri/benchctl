@@ -68,8 +68,9 @@ func (e *DeviceError) Error() string {
 
 // Codes worth matching on.
 const (
-	ErrCodeLocked  = 11
-	ErrCodeTimeout = 15
+	ErrCodeNotSupported = 8
+	ErrCodeLocked       = 11
+	ErrCodeTimeout      = 15
 )
 
 // IsCode reports whether err is a DeviceError with the given code.

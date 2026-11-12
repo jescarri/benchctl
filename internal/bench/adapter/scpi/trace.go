@@ -44,9 +44,17 @@ func Summarize(b []byte) string {
 		}
 	}
 	if printable {
-		s := strconv.Quote(string(b))
+		// Quote at most what will be shown, not a whole large transfer.
+		shown := b
+		if len(shown) > max {
+			shown = shown[:max]
+		}
+		s := strconv.Quote(string(shown))
 		if len(s) > max {
-			s = s[:max] + "…"
+			s = s[:max]
+		}
+		if len(b) > max || len(s) == max {
+			s += fmt.Sprintf("… (%d bytes)", len(b))
 		}
 		return s
 	}

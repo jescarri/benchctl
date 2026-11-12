@@ -4,7 +4,6 @@ package config
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 
@@ -55,11 +54,22 @@ func (s *FileStore) Load() (*domain.Bench, error) {
 	if bench.Instruments == nil {
 		bench.Instruments = map[string]domain.InstrumentRef{}
 	}
+	if err := bench.ValidateLimits(); err != nil {
+		return nil, domain.Usagef("%s: %v", s.path, err)
+	}
 	return &bench, nil
 }
 
-// Save implements port.ConfigStore (atomic replace).
+// Save implements port.ConfigStore (atomic replace). Failures are config
+// (usage) errors, like Load's.
 func (s *FileStore) Save(b *domain.Bench) error {
+	if err := s.save(b); err != nil {
+		return domain.Usagef("save config %s: %v", s.path, err)
+	}
+	return nil
+}
+
+func (s *FileStore) save(b *domain.Bench) error {
 	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
 		return err
 	}
@@ -82,7 +92,7 @@ func (s *FileStore) Save(b *domain.Bench) error {
 	}
 	if err := os.Rename(tmp.Name(), s.path); err != nil {
 		_ = os.Remove(tmp.Name())
-		return fmt.Errorf("save config: %w", err)
+		return err
 	}
 	return nil
 }

@@ -83,7 +83,9 @@ func setup(t *testing.T, lastIP string) env {
 	var log bytes.Buffer
 	return env{
 		conn: &connect.Connector{
-			Store: store, Discoverer: &discovery.Scanner{Port: port, Raw: true, VXI11Port: -1, ConnectTimeout: 200 * time.Millisecond},
+			// Raw probing off, as in the CLI by default: rediscovery of the
+			// raw-configured dmm must turn it on for that scan only.
+			Store: store, Discoverer: &discovery.Scanner{Port: port, VXI11Port: -1, ConnectTimeout: 200 * time.Millisecond},
 			Log: &log, RawPort: port, LockDir: t.TempDir(), VXI11Port: closedPort(t),
 			DialTimeout: 500 * time.Millisecond, IOTimeout: time.Second,
 		},
@@ -146,6 +148,17 @@ func TestAutoNeverFallsBackToRaw(t *testing.T) {
 	defer func() { _ = inst.Close() }()
 	if inst.SCPI().TransportName() != "raw" {
 		t.Fatalf("transport %s", inst.SCPI().TransportName())
+	}
+}
+
+func TestUnknownTransportIsUsageError(t *testing.T) {
+	e := setup(t, "127.0.0.2")
+	e.conn.Transport = "carrier-pigeon"
+	if _, err := e.conn.Open(ctx(t), "dmm"); domain.KindOf(err) != domain.KindUsage {
+		t.Fatalf("want usage error, got %v", err)
+	}
+	if strings.Contains(e.log.String(), "rescanning") {
+		t.Fatalf("usage error must not trigger a rescan: %s", e.log)
 	}
 }
 

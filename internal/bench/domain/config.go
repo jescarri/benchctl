@@ -2,6 +2,7 @@ package domain
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -74,22 +75,49 @@ func (b *Bench) Aliases() []string {
 	return out
 }
 
-// Limit returns a numeric limit, e.g. Limit("fg", "max_amp_vpp").
+// Limit returns a numeric limit, e.g. Limit("fg", "max_amp_vpp"). An invalid
+// configured value reports ok=false; use LimitValue to tell it from "not set".
 func (b *Bench) Limit(alias, key string) (float64, bool) {
-	m, ok := b.Limits[alias]
+	v, ok, err := b.LimitValue(alias, key)
+	return v, ok && err == nil
+}
+
+// LimitValue returns a numeric limit. set is false when the limit is not
+// configured; err is non-nil when it is configured but not a finite number
+// (e.g. "5volts"), which must never be treated as "no limit".
+func (b *Bench) LimitValue(alias, key string) (v float64, set bool, err error) {
+	raw, ok := b.Limits[alias][key]
 	if !ok {
-		return 0, false
+		return 0, false, nil
 	}
-	switch v := m[key].(type) {
+	switch x := raw.(type) {
 	case float64:
-		return v, true
+		v = x
 	case int:
-		return float64(v), true
+		v = float64(x)
 	case string:
-		q, err := ParseQuantity(v)
-		if err == nil {
-			return q.Value, true
+		q, perr := ParseQuantity(x)
+		if perr != nil {
+			return 0, true, fmt.Errorf("limit %s.%s = %q: %v", alias, key, x, perr)
+		}
+		v = q.Value
+	default:
+		return 0, true, fmt.Errorf("limit %s.%s = %v: not a number", alias, key, raw)
+	}
+	if math.IsNaN(v) || math.IsInf(v, 0) || v < 0 {
+		return 0, true, fmt.Errorf("limit %s.%s = %v: must be a finite, non-negative number", alias, key, raw)
+	}
+	return v, true, nil
+}
+
+// ValidateLimits checks every configured limit is a usable number.
+func (b *Bench) ValidateLimits() error {
+	for alias, m := range b.Limits {
+		for key := range m {
+			if _, _, err := b.LimitValue(alias, key); err != nil {
+				return Usagef("%v", err)
+			}
 		}
 	}
-	return 0, false
+	return nil
 }

@@ -174,3 +174,44 @@ func TestErrorKinds(t *testing.T) {
 		}
 	}
 }
+
+func TestParseInstrumentNumberSuffixes(t *testing.T) {
+	for in, want := range map[string]float64{
+		"700mV": 0.7, "1.00GSa/s": 1e9, "14Mpts": 14e6, "4.997V": 4.997,
+		"1.414Vrms": 1.414, "250uS": 250e-6, "3.3KHZ": 3300, "700K": 700e3,
+	} {
+		v, ok, err := ParseInstrumentNumber(in)
+		if err != nil || !ok || !approx(v, want) {
+			t.Errorf("%s = %v %v %v, want %v", in, v, ok, err, want)
+		}
+	}
+	for _, bad := range []string{"5volts", "12 bogus", "3xV"} {
+		if _, _, err := ParseInstrumentNumber(bad); err == nil {
+			t.Errorf("%s: unrecognized suffix accepted", bad)
+		}
+	}
+}
+
+func TestParseToleranceRejectsNonFinite(t *testing.T) {
+	for _, bad := range []string{"Inf%", "NaN%", "-3%", "inf"} {
+		if _, err := ParseTolerance(bad); err == nil {
+			t.Errorf("%s accepted", bad)
+		}
+	}
+}
+
+func TestLimitValueInvalid(t *testing.T) {
+	b := &Bench{Limits: map[string]map[string]any{"fg": {"max_amp_vpp": "5volts", "max_abs_v": 5.0}}}
+	if _, set, err := b.LimitValue("fg", "max_amp_vpp"); !set || err == nil {
+		t.Fatalf("invalid limit: set=%v err=%v", set, err)
+	}
+	if _, ok := b.Limit("fg", "max_amp_vpp"); ok {
+		t.Fatal("invalid limit reported as usable")
+	}
+	if _, set, err := b.LimitValue("fg", "max_freq_hz"); set || err != nil {
+		t.Fatal("absent limit")
+	}
+	if err := b.ValidateLimits(); KindOf(err) != KindUsage {
+		t.Fatalf("validate: %v", err)
+	}
+}
