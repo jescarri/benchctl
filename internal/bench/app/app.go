@@ -106,6 +106,21 @@ func (c *conns) dmm(ctx context.Context, alias string) (port.DMM, error) {
 // bench loads the inventory.
 func (a *App) bench() (*domain.Bench, error) { return a.Store.Load() }
 
+// benchForOutputs loads the inventory for an operation that can energize a
+// generator output: every configured limit must be a usable number, so a
+// typo is a config error instead of "no limit". Shutdown paths (safe) use
+// bench, so an invalid limit never keeps an output on.
+func (a *App) benchForOutputs() (*domain.Bench, error) {
+	b, err := a.bench()
+	if err != nil {
+		return nil, err
+	}
+	if err := b.ValidateLimits(); err != nil {
+		return nil, domain.Usagef("%s: %v", a.Store.Path(), err)
+	}
+	return b, nil
+}
+
 func (a *App) roleOf(model string) domain.Role {
 	if a.RoleOf == nil {
 		return domain.RoleUnknown

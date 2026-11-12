@@ -3,7 +3,9 @@ package app
 import (
 	"context"
 	"fmt"
+	"maps"
 	"math"
+	"slices"
 	"strings"
 	"time"
 
@@ -127,8 +129,8 @@ var (
 // and scope channel/timebase/trigger settings are restored.
 //
 // links == nil means the inventory wiring.
-func (a *App) WiringVerify(ctx context.Context, links []domain.Link) (WiringReport, error) {
-	b, err := a.bench()
+func (a *App) WiringVerify(ctx context.Context, links []domain.Link) (rep WiringReport, err error) {
+	b, err := a.benchForOutputs()
 	if err != nil {
 		return WiringReport{}, err
 	}
@@ -140,7 +142,7 @@ func (a *App) WiringVerify(ctx context.Context, links []domain.Link) (WiringRepo
 	}
 	c := a.conns()
 	defer c.closeAll()
-	rep := WiringReport{OK: true}
+	rep = WiringReport{OK: true}
 
 	var fs []genScopeLink
 	var dmmLinks []domain.Link
@@ -149,6 +151,11 @@ func (a *App) WiringVerify(ctx context.Context, links []domain.Link) (WiringRepo
 		fr, fok := b.Instruments[from.Alias]
 		tr, tok := b.Instruments[to.Alias]
 		switch {
+		case !fok && !externalAlias(from.Alias):
+			// An unknown source would be treated as undriven, so a stray
+			// voltage matching expect could pass a link that does not exist.
+			return rep, domain.Usagef("link %s → %s: unknown instrument %q (external sources use %s)",
+				l.From, l.To, from.Alias, strings.Join(externalAliases, ", "))
 		case fok && tok && a.roleOf(fr.Model) == domain.RoleGenerator && a.roleOf(tr.Model) == domain.RoleScope:
 			fch, e1 := from.ChannelNumber()
 			sch, e2 := to.ChannelNumber()
@@ -174,9 +181,14 @@ func (a *App) WiringVerify(ctx context.Context, links []domain.Link) (WiringRepo
 	defer func() {
 		octx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		for alias, g := range gens {
-			if err := g.(port.Outputs).AllOutputsOff(octx); err != nil {
-				a.warnf("could not switch off %s outputs: %v", alias, err)
+		for _, alias := range slices.Sorted(maps.Keys(gens)) {
+			if offErr := gens[alias].(port.Outputs).AllOutputsOff(octx); offErr != nil {
+				// An output that may still be on fails the run, whatever the links said.
+				a.warnf("could not switch off %s outputs: %v", alias, offErr)
+				rep.OK = false
+				if err == nil {
+					err = domain.Instrumentf("wiring verify: could not switch off %s outputs: %v", alias, offErr)
+				}
 			}
 		}
 	}()

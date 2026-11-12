@@ -91,22 +91,37 @@ func Summarize(wf domain.Waveform) WaveSummary {
 
 // PeakFrequency returns the frequency of the largest non-DC spectral bin,
 // refined by parabolic interpolation. Uses a radix-2 FFT on a Hann-windowed
-// copy truncated to a power of two. Long records are decimated first so the
-// transform stays at most maxFFT points (a full 14 Mpts capture would
-// otherwise allocate hundreds of MB).
+// copy truncated to a power of two.
+//
+// Long records are box-decimated so the transform stays at most maxFFT points
+// (a full 14 Mpts capture would otherwise allocate hundreds of MB). Box
+// averaging is a weak anti-alias filter, so a full-rate window of maxFFT
+// points is analysed too: when its peak lies above the decimated record's
+// Nyquist band, the decimated peak would be an alias and the full-rate one
+// is returned instead.
 func PeakFrequency(v []float64, dt float64) float64 {
 	const maxFFT = 1 << 20
-	if step := (len(v) + maxFFT - 1) / maxFFT; step > 1 {
-		d := make([]float64, 0, len(v)/step+1)
-		for i := 0; i+step <= len(v); i += step {
-			sum := 0.0 // box-average each block: a cheap anti-alias filter
-			for _, x := range v[i : i+step] {
-				sum += x
-			}
-			d = append(d, sum/float64(step))
-		}
-		v, dt = d, dt*float64(step)
+	step := (len(v) + maxFFT - 1) / maxFFT
+	if step <= 1 {
+		return peakFFT(v, dt)
 	}
+	full := peakFFT(v[:maxFFT], dt)
+	if decNyquist := 1 / (2 * dt * float64(step)); full > 0.8*decNyquist {
+		return full
+	}
+	d := make([]float64, 0, len(v)/step+1)
+	for i := 0; i+step <= len(v); i += step {
+		sum := 0.0
+		for _, x := range v[i : i+step] {
+			sum += x
+		}
+		d = append(d, sum/float64(step))
+	}
+	return peakFFT(d, dt*float64(step))
+}
+
+// peakFFT is PeakFrequency without decimation.
+func peakFFT(v []float64, dt float64) float64 {
 	n := 1
 	for n*2 <= len(v) {
 		n *= 2

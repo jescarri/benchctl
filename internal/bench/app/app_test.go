@@ -348,12 +348,22 @@ func TestPeakFrequency(t *testing.T) {
 	}
 	// A record longer than the FFT cap is decimated, not truncated to its
 	// start, and still finds the peak.
+	// The signal starts after the first 1<<20 samples, so analysing only
+	// the start of the record would miss it.
 	long := make([]float64, 3<<20)
-	for i := range long {
+	for i := 1 << 20; i < len(long); i++ {
 		long[i] = math.Sin(2 * math.Pi * 1000 * float64(i) * 1e-7)
 	}
 	if f := PeakFrequency(long, 1e-7); math.Abs(f-1000)/1000 > 0.01 {
 		t.Fatalf("long record peak %v", f)
+	}
+	// 2 MHz is above the decimated record's Nyquist (1.67 MHz at step 3):
+	// it must not be reported as its ~1.33 MHz alias.
+	for i := range long {
+		long[i] = math.Sin(2 * math.Pi * 2e6 * float64(i) * 1e-7)
+	}
+	if f := PeakFrequency(long, 1e-7); math.Abs(f-2e6)/2e6 > 0.01 {
+		t.Fatalf("high-frequency long record peak %v, want 2 MHz", f)
 	}
 }
 
@@ -673,8 +683,12 @@ func TestWiringVerifyRespectsLimits(t *testing.T) {
 	if _, err := a.WiringVerify(ctx, five); domain.KindOf(err) != domain.KindUsage || !strings.Contains(err.Error(), "max_abs_v") {
 		t.Fatalf("5 V DC over a 2 V limit: %v", err)
 	}
-	if st := b.Gens["fg"].Ch(1); st.Output || st.Offset == 5 {
-		t.Fatalf("generator touched: %+v", st)
+	// The final state could hide a brief 5 V excursion: no change at all may
+	// reach the generator before the limit check.
+	for _, call := range b.Gens["fg"].Calls() {
+		if strings.Contains(call, "offset=5") || strings.Contains(call, "output=true") {
+			t.Fatalf("rejected level reached the generator: %v", b.Gens["fg"].Calls())
+		}
 	}
 	// The 1 Vpp scope test signal peaks at 0.5 V.
 	store.B.Limits = map[string]map[string]any{"fg": {"max_abs_v": 0.2}}
@@ -685,5 +699,84 @@ func TestWiringVerifyRespectsLimits(t *testing.T) {
 	store.B.Limits = map[string]map[string]any{"fg": {"max_amp_vpp": "5volts"}}
 	if _, err := a.FGSet(ctx, FGSetRequest{Alias: "fg", Channel: 1, Wave: domain.WaveSpec{AmpVpp: ptr(1.0)}}); domain.KindOf(err) != domain.KindUsage {
 		t.Fatalf("invalid limit: %v", err)
+	}
+}
+
+func TestSafeIgnoresInvalidLimits(t *testing.T) {
+	ctx := context.Background()
+	a, b, store, _ := rig(t, straight)
+	must(t, b.Gens["fg"].Output(ctx, 1, true))
+	store.B.Limits = map[string]map[string]any{"fg": {"max_amp_vpp": "5volts"}}
+	if sr, err := a.Safe(ctx); err != nil || b.Gens["fg"].Ch(1).Output {
+		t.Fatalf("safe blocked by an invalid limit: %+v %v", sr, err)
+	}
+	// Anything that can energize an output still refuses the config.
+	if _, err := a.FGOutput(ctx, "fg", 1, true); domain.KindOf(err) != domain.KindUsage {
+		t.Fatalf("output on with invalid limit: %v", err)
+	}
+	if _, err := a.WiringVerify(ctx, nil); domain.KindOf(err) != domain.KindUsage {
+		t.Fatalf("wiring verify with invalid limit: %v", err)
+	}
+	if b.Gens["fg"].Ch(1).Output {
+		t.Fatal("output switched on")
+	}
+	// Switching off is always allowed.
+	if _, err := a.FGOutput(ctx, "fg", 1, false); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestGenLimitsUseRetainedFrequency(t *testing.T) {
+	ctx := context.Background()
+	a, b, store, _ := rig(t, straight)
+	must(t, b.Gens["fg"].SetWave(ctx, 1, domain.WaveSpec{Type: "sine", Freq: ptr(10e3), AmpVpp: ptr(1.0), Offset: ptr(0.0)}))
+	store.B.Limits = map[string]map[string]any{"fg": {"max_freq_hz": 1e3}}
+	// An amplitude-only update keeps 10 kHz, above the 1 kHz limit.
+	if _, err := a.FGSet(ctx, FGSetRequest{Alias: "fg", Channel: 1, Wave: domain.WaveSpec{AmpVpp: ptr(2.0)}}); domain.KindOf(err) != domain.KindUsage || !strings.Contains(err.Error(), "max_freq_hz") {
+		t.Fatalf("retained frequency over limit: %v", err)
+	}
+	// Switching on a channel left above the limit is refused too.
+	if _, err := a.FGOutput(ctx, "fg", 1, true); domain.KindOf(err) != domain.KindUsage {
+		t.Fatalf("output on above limit: %v", err)
+	}
+	// Lowering the frequency in the same request is fine, as is DC.
+	if _, err := a.FGSet(ctx, FGSetRequest{Alias: "fg", Channel: 1, Wave: domain.WaveSpec{Freq: ptr(500.0), AmpVpp: ptr(2.0)}}); err != nil {
+		t.Fatal(err)
+	}
+	must(t, b.Gens["fg"].SetWave(ctx, 2, domain.WaveSpec{Freq: ptr(10e3)}))
+	if _, err := a.FGSet(ctx, FGSetRequest{Alias: "fg", Channel: 2, Wave: domain.WaveSpec{Type: "dc", Offset: ptr(1.0)}}); err != nil {
+		t.Fatalf("dc ignores frequency: %v", err)
+	}
+}
+
+func TestStatusSnapshotFailure(t *testing.T) {
+	a, b, _, _ := rig(t, straight)
+	b.Gens["fg"].StateErr = domain.Instrumentf("BSWV? timed out")
+	st, err := a.Status(context.Background(), nil)
+	if domain.KindOf(err) != domain.KindInstrument || len(st) != 3 {
+		t.Fatalf("snapshot failure must fail status: %+v %v", st, err)
+	}
+	for _, s := range st {
+		if s.Alias == "fg" && (!s.Reachable || s.Error == "") {
+			t.Fatalf("partial status lost: %+v", s)
+		}
+	}
+}
+
+func TestWiringVerifyUnknownSource(t *testing.T) {
+	a, _, _, _ := rig(t, straight)
+	// The DMM reads the external 5 V: a typo in the source must not pass.
+	l := []domain.Link{{From: "fgg:CH1", To: "dmm:V", Expect: &domain.Expect{Function: "vdc", Value: 5, Tolerance: "5%"}}}
+	if _, err := a.WiringVerify(context.Background(), l); domain.KindOf(err) != domain.KindUsage || !strings.Contains(err.Error(), "fgg") {
+		t.Fatalf("unknown source: %v", err)
+	}
+}
+
+func TestWiringVerifyFailsWhenOutputsStayOn(t *testing.T) {
+	a, b, _, _ := rig(t, straight)
+	b.Gens["fg"].OffErr = domain.Instrumentf("OUTP OFF not acknowledged")
+	rep, err := a.WiringVerify(context.Background(), nil)
+	if err == nil || rep.OK || !strings.Contains(err.Error(), "could not switch off fg") {
+		t.Fatalf("shutdown failure must fail verification: %+v %v", rep, err)
 	}
 }

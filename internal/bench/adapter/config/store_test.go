@@ -20,19 +20,19 @@ func TestSaveFailureIsConfigError(t *testing.T) {
 	}
 }
 
-func TestLoadRejectsInvalidLimits(t *testing.T) {
+func TestLoadKeepsInvalidLimits(t *testing.T) {
+	// Load must not reject an invalid limit: safe needs the inventory to
+	// switch outputs off. The operations that can energize an output
+	// validate limits themselves (App.benchForOutputs).
 	p := filepath.Join(t.TempDir(), "bench.json")
 	if err := os.WriteFile(p, []byte(`{"instruments":{},"limits":{"fg":{"max_amp_vpp":"5volts"}}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := New(p).Load(); domain.KindOf(err) != domain.KindUsage {
-		t.Fatalf("want usage error, got %v", err)
-	}
-	s := New(p)
-	if err := s.Save(&domain.Bench{Limits: map[string]map[string]any{"fg": {"max_amp_vpp": 10.0}}}); err != nil {
+	b, err := New(p).Load()
+	if err != nil {
 		t.Fatal(err)
 	}
-	if b, err := s.Load(); err != nil || b.Limits["fg"]["max_amp_vpp"] != 10.0 {
-		t.Fatalf("%+v %v", b, err)
+	if err := b.ValidateLimits(); err == nil {
+		t.Fatal("invalid limit not reported by ValidateLimits")
 	}
 }

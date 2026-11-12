@@ -72,8 +72,14 @@ func CheckGenLimits(b *domain.Bench, alias string, w domain.WaveSpec, cur domain
 	if lim, set, err = limit("max_freq_hz"); err != nil {
 		return err
 	}
-	if set && w.Freq != nil && *w.Freq > lim {
-		return domain.Usagef("frequency %g Hz exceeds %s limit max_freq_hz=%g", *w.Freq, alias, lim)
+	// A partial update keeps the current frequency, so check what the
+	// channel will actually run at (frequency is meaningless for DC/noise).
+	freq := cur.Freq
+	if w.Freq != nil {
+		freq = *w.Freq
+	}
+	if set && wave != "dc" && wave != "noise" && freq > lim {
+		return domain.Usagef("frequency %g Hz exceeds %s limit max_freq_hz=%g", freq, alias, lim)
 	}
 	return nil
 }
@@ -84,7 +90,7 @@ func (a *App) FGSet(ctx context.Context, r FGSetRequest) (FGResult, error) {
 	if err != nil {
 		return FGResult{}, err
 	}
-	b, err := a.bench()
+	b, err := a.benchForOutputs()
 	if err != nil {
 		return FGResult{}, err
 	}
@@ -173,11 +179,27 @@ func (a *App) FGOutput(ctx context.Context, alias string, ch int, on bool) (FGRe
 	if err != nil {
 		return FGResult{}, err
 	}
+	var b *domain.Bench
+	if on {
+		if b, err = a.benchForOutputs(); err != nil {
+			return FGResult{}, err
+		}
+	}
 	c := a.conns()
 	defer c.closeAll()
 	g, err := c.generator(ctx, alias)
 	if err != nil {
 		return FGResult{}, err
+	}
+	if on {
+		// Switching on energizes whatever is configured: it must be within limits.
+		cur, err := g.State(ctx, ch)
+		if err != nil {
+			return FGResult{}, err
+		}
+		if err := CheckGenLimits(b, alias, domain.WaveSpec{}, cur); err != nil {
+			return FGResult{}, err
+		}
 	}
 	if err := g.Output(ctx, ch, on); err != nil {
 		return FGResult{}, err

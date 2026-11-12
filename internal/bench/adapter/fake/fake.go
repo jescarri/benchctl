@@ -6,6 +6,7 @@ package fake
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"sort"
 	"strings"
@@ -188,6 +189,20 @@ type Generator struct {
 	id    domain.Identity
 	ch    [3]domain.GenChannelState
 	scpi  SCPI
+	calls []string
+
+	// StateErr, when set, makes State fail (a settings read-back failure).
+	StateErr error
+	// OffErr, when set, makes AllOutputsOff fail after switching outputs off.
+	OffErr error
+}
+
+// Calls returns every setting/output change in order, e.g. "C1 offset=5",
+// "C1 output=true" (tests).
+func (g *Generator) Calls() []string {
+	g.bench.mu.Lock()
+	defer g.bench.mu.Unlock()
+	return append([]string(nil), g.calls...)
 }
 
 func (g *Generator) Identity() domain.Identity { return g.id }
@@ -210,6 +225,7 @@ func (g *Generator) SetWave(_ context.Context, ch int, w domain.WaveSpec) error 
 	g.bench.mu.Lock()
 	defer g.bench.mu.Unlock()
 	st := &g.ch[ch]
+	g.calls = append(g.calls, fmt.Sprintf("C%d wave=%s", ch, describeWave(w)))
 	if w.Type != "" {
 		st.Wave = strings.ToLower(w.Type)
 	}
@@ -247,6 +263,7 @@ func (g *Generator) Output(_ context.Context, ch int, on bool) error {
 	}
 	g.bench.mu.Lock()
 	defer g.bench.mu.Unlock()
+	g.calls = append(g.calls, fmt.Sprintf("C%d output=%t", ch, on))
 	g.ch[ch].Output = on
 	return nil
 }
@@ -257,6 +274,9 @@ func (g *Generator) State(_ context.Context, ch int) (domain.GenChannelState, er
 	}
 	g.bench.mu.Lock()
 	defer g.bench.mu.Unlock()
+	if g.StateErr != nil {
+		return domain.GenChannelState{}, g.StateErr
+	}
 	return g.ch[ch], nil
 }
 
@@ -264,7 +284,7 @@ func (g *Generator) AllOutputsOff(ctx context.Context) error {
 	for ch := 1; ch <= 2; ch++ {
 		_ = g.Output(ctx, ch, false)
 	}
-	return nil
+	return g.OffErr
 }
 
 // Ch returns channel state without locking concerns (tests).
@@ -570,3 +590,19 @@ func (s *Scanner) Scan(context.Context, string) ([]port.Found, error) {
 
 // NoSleep is a Sleep replacement for tests.
 func NoSleep(time.Duration) {}
+
+func describeWave(w domain.WaveSpec) string {
+	var parts []string
+	if w.Type != "" {
+		parts = append(parts, "type="+w.Type)
+	}
+	for _, f := range []struct {
+		name string
+		v    *float64
+	}{{"freq", w.Freq}, {"amp", w.AmpVpp}, {"amprms", w.AmpRMS}, {"offset", w.Offset}, {"phase", w.Phase}} {
+		if f.v != nil {
+			parts = append(parts, fmt.Sprintf("%s=%g", f.name, *f.v))
+		}
+	}
+	return strings.Join(parts, ",")
+}

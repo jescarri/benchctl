@@ -54,9 +54,9 @@ func (s *FileStore) Load() (*domain.Bench, error) {
 	if bench.Instruments == nil {
 		bench.Instruments = map[string]domain.InstrumentRef{}
 	}
-	if err := bench.ValidateLimits(); err != nil {
-		return nil, domain.Usagef("%s: %v", s.path, err)
-	}
+	// Limits are validated by the operations that can energize an output
+	// (App.benchForOutputs), never here: an invalid limit must not stop
+	// `safe` from switching outputs off.
 	return &bench, nil
 }
 

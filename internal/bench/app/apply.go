@@ -230,7 +230,7 @@ func decodeStep(n *yaml.Node, v any) error {
 // context is cancelled (SIGINT), or the plan sets safe_on_exit. Paths in the
 // plan (capture outputs) are relative to baseDir.
 func (a *App) Apply(ctx context.Context, p *Plan, baseDir string) (res PlanResult, err error) {
-	b, err := a.bench()
+	b, err := a.benchForOutputs()
 	if err != nil {
 		return PlanResult{}, err
 	}

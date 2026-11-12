@@ -327,7 +327,8 @@ reports the transport and SRQ status.
   explicit command, and `apply` plans must state it.
 - Per-instrument limits live in `bench.json` (e.g. `fg.max_amp_vpp`, `psu.max_v`,
   `psu.max_i`). The CLI refuses values over a limit before sending anything. An invalid limit
-  value is a config error when the inventory loads, never "no limit". `raw`, `script` and
+  value is a config error for every command that can energize an output, never "no limit";
+  `safe` does not validate limits, so a bad value can never keep an output on. `raw`, `script` and
   `raw` plan steps send SCPI unchecked and bypass the limits.
 - `benchctl safe` turns all outputs off on every instrument, and exits non-zero (3 if
   unreachable, else 1) when any output is not confirmed off. Plans run it in a

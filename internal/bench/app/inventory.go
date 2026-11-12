@@ -144,6 +144,9 @@ func (a *App) Status(ctx context.Context, aliases []string) ([]InstrumentStatus,
 		snap, err := snapshot(ctx, inst)
 		if err != nil {
 			st.Error = err.Error()
+			if firstErr == nil {
+				firstErr = err
+			}
 		}
 		st.State = snap
 		out = append(out, st)
