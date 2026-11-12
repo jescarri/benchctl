@@ -184,12 +184,17 @@ func (a *App) WiringVerify(ctx context.Context, links []domain.Link) (rep Wiring
 		for _, alias := range slices.Sorted(maps.Keys(gens)) {
 			if offErr := gens[alias].(port.Outputs).AllOutputsOff(octx); offErr != nil {
 				// An output that may still be on fails the run, whatever the links said.
-				a.warnf("could not switch off %s outputs: %v", alias, offErr)
+				msg := fmt.Sprintf("could not switch off %s outputs: %v", alias, offErr)
+				a.warnf("%s", msg)
+				rep.Warnings = append(rep.Warnings, msg)
 				rep.OK = false
 				if err == nil {
 					err = domain.Instrumentf("wiring verify: could not switch off %s outputs: %v", alias, offErr)
 				}
 			}
+		}
+		if err != nil {
+			rep.OK = false // every failure path, including errors from the checks
 		}
 	}()
 	getGen := func(alias string) (port.Generator, error) {

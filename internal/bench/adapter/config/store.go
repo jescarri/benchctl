@@ -55,7 +55,7 @@ func (s *FileStore) Load() (*domain.Bench, error) {
 		bench.Instruments = map[string]domain.InstrumentRef{}
 	}
 	// Limits are validated by the operations that can energize an output
-	// (App.benchForOutputs), never here: an invalid limit must not stop
+	// (app.CheckGenLimits), never here: an invalid limit must not stop
 	// `safe` from switching outputs off.
 	return &bench, nil
 }

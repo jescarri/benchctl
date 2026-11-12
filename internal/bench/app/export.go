@@ -93,19 +93,29 @@ func Summarize(wf domain.Waveform) WaveSummary {
 // refined by parabolic interpolation. Uses a radix-2 FFT on a Hann-windowed
 // copy truncated to a power of two.
 //
-// Long records are box-decimated so the transform stays at most maxFFT points
-// (a full 14 Mpts capture would otherwise allocate hundreds of MB). Box
-// averaging is a weak anti-alias filter, so a full-rate window of maxFFT
-// points is analysed too: when its peak lies above the decimated record's
-// Nyquist band, the decimated peak would be an alias and the full-rate one
-// is returned instead.
+// A long record is never transformed whole (a 14 Mpts capture would allocate
+// hundreds of MB). It is cut into consecutive full-rate windows of maxFFT
+// points covering the whole record, and the strongest peak across them is
+// the dominant frequency. When that peak lies within the band a box-decimated
+// copy of the record can represent, the decimated copy is analysed instead
+// for its finer frequency resolution; otherwise the decimated peak would be
+// an alias, so the full-rate one is returned.
 func PeakFrequency(v []float64, dt float64) float64 {
 	const maxFFT = 1 << 20
 	step := (len(v) + maxFFT - 1) / maxFFT
 	if step <= 1 {
-		return peakFFT(v, dt)
+		f, _ := peakFFT(v, dt)
+		return f
 	}
-	full := peakFFT(v[:maxFFT], dt)
+	full, best := 0.0, -1.0
+	for start := 0; start < len(v); start += maxFFT {
+		if start+maxFFT > len(v) {
+			start = len(v) - maxFFT // last window ends at the record end
+		}
+		if f, m := peakFFT(v[start:start+maxFFT], dt); m > best {
+			full, best = f, m
+		}
+	}
 	if decNyquist := 1 / (2 * dt * float64(step)); full > 0.8*decNyquist {
 		return full
 	}
@@ -117,17 +127,19 @@ func PeakFrequency(v []float64, dt float64) float64 {
 		}
 		d = append(d, sum/float64(step))
 	}
-	return peakFFT(d, dt*float64(step))
+	f, _ := peakFFT(d, dt*float64(step))
+	return f
 }
 
-// peakFFT is PeakFrequency without decimation.
-func peakFFT(v []float64, dt float64) float64 {
+// peakFFT returns the interpolated peak frequency of v and that bin's
+// magnitude (0, 0 when there is no usable peak).
+func peakFFT(v []float64, dt float64) (float64, float64) {
 	n := 1
 	for n*2 <= len(v) {
 		n *= 2
 	}
 	if n < 8 || dt <= 0 {
-		return 0
+		return 0, 0
 	}
 	mean := 0.0
 	for _, x := range v[:n] {
@@ -149,7 +161,7 @@ func peakFFT(v []float64, dt float64) float64 {
 		}
 	}
 	if bi == 0 {
-		return 0
+		return 0, 0
 	}
 	delta := 0.0
 	if bi > 1 && bi < n/2-1 {
@@ -158,7 +170,7 @@ func peakFFT(v []float64, dt float64) float64 {
 			delta = 0.5 * (a - c) / d
 		}
 	}
-	return (float64(bi) + delta) / (float64(n) * dt)
+	return (float64(bi) + delta) / (float64(n) * dt), best
 }
 
 // fft is an in-place iterative radix-2 Cooley-Tukey FFT; len(a) must be a power of two.

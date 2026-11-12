@@ -23,7 +23,7 @@ func TestSaveFailureIsConfigError(t *testing.T) {
 func TestLoadKeepsInvalidLimits(t *testing.T) {
 	// Load must not reject an invalid limit: safe needs the inventory to
 	// switch outputs off. The operations that can energize an output
-	// validate limits themselves (App.benchForOutputs).
+	// validate limits themselves (app.CheckGenLimits).
 	p := filepath.Join(t.TempDir(), "bench.json")
 	if err := os.WriteFile(p, []byte(`{"instruments":{},"limits":{"fg":{"max_amp_vpp":"5volts"}}}`), 0o600); err != nil {
 		t.Fatal(err)

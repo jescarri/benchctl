@@ -230,7 +230,9 @@ func decodeStep(n *yaml.Node, v any) error {
 // context is cancelled (SIGINT), or the plan sets safe_on_exit. Paths in the
 // plan (capture outputs) are relative to baseDir.
 func (a *App) Apply(ctx context.Context, p *Plan, baseDir string) (res PlanResult, err error) {
-	b, err := a.benchForOutputs()
+	// Limits are validated by the steps that can energize an output
+	// (CheckGenLimits), so a plan of only safe steps still runs.
+	b, err := a.bench()
 	if err != nil {
 		return PlanResult{}, err
 	}
@@ -372,7 +374,7 @@ func (a *App) runStep(ctx context.Context, c *conns, b *domain.Bench, action str
 		if err != nil {
 			return nil, nil, err
 		}
-		if err := g.Output(ctx, s.Ch, on); err != nil {
+		if err := switchOutput(ctx, b, g, alias, s.Ch, on); err != nil {
 			return nil, nil, err
 		}
 		return map[string]any{"alias": alias, "ch": s.Ch, "output": on}, nil, nil

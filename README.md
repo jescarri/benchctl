@@ -89,7 +89,7 @@ The inventory is `~/.config/benchctl/bench.json` (`--config` / `BENCHCTL_CONFIG`
 instruments (serial, model, last IP, optional `transport`), `wiring` (links can include an
 `expect` reading for external sources) and `limits` (`fg.max_amp_vpp`, `fg.max_abs_v`,
 `fg.max_freq_hz`). They are checked before anything is sent by `fg set`, `fg output on` (against
-the channel's current settings), `apply` `fg.set` steps and the `wiring verify` test signals.
+the channel's current settings), `apply` `fg.set` and `fg.output` steps, and the `wiring verify` test signals.
 **`raw`, `script` and `raw` plan steps send SCPI as given and bypass these limits.** An invalid
 limit value (e.g. `"5volts"`) makes those commands fail with a config error instead of meaning
 "no limit"; `safe` ignores limits so it can always switch outputs off.

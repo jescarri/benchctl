@@ -30,7 +30,13 @@ type FGResult struct {
 
 // CheckGenLimits enforces bench.json limits for a generator alias:
 // max_amp_vpp and max_abs_v (|offset| + amp/2).
+//
+// Every configured limit must be a usable number: an invalid one is a config
+// error, never "no limit".
 func CheckGenLimits(b *domain.Bench, alias string, w domain.WaveSpec, cur domain.GenChannelState) error {
+	if err := b.ValidateLimits(); err != nil {
+		return domain.Usagef("invalid bench limit: %v", err)
+	}
 	amp := cur.AmpVpp
 	if w.AmpVpp != nil {
 		amp = *w.AmpVpp
@@ -90,7 +96,7 @@ func (a *App) FGSet(ctx context.Context, r FGSetRequest) (FGResult, error) {
 	if err != nil {
 		return FGResult{}, err
 	}
-	b, err := a.benchForOutputs()
+	b, err := a.bench()
 	if err != nil {
 		return FGResult{}, err
 	}
@@ -179,11 +185,9 @@ func (a *App) FGOutput(ctx context.Context, alias string, ch int, on bool) (FGRe
 	if err != nil {
 		return FGResult{}, err
 	}
-	var b *domain.Bench
-	if on {
-		if b, err = a.benchForOutputs(); err != nil {
-			return FGResult{}, err
-		}
+	b, err := a.bench()
+	if err != nil {
+		return FGResult{}, err
 	}
 	c := a.conns()
 	defer c.closeAll()
@@ -191,21 +195,27 @@ func (a *App) FGOutput(ctx context.Context, alias string, ch int, on bool) (FGRe
 	if err != nil {
 		return FGResult{}, err
 	}
-	if on {
-		// Switching on energizes whatever is configured: it must be within limits.
-		cur, err := g.State(ctx, ch)
-		if err != nil {
-			return FGResult{}, err
-		}
-		if err := CheckGenLimits(b, alias, domain.WaveSpec{}, cur); err != nil {
-			return FGResult{}, err
-		}
-	}
-	if err := g.Output(ctx, ch, on); err != nil {
+	if err := switchOutput(ctx, b, g, alias, ch, on); err != nil {
 		return FGResult{}, err
 	}
 	st, err := g.State(ctx, ch)
 	return FGResult{Alias: alias, State: st}, err
+}
+
+// switchOutput switches a generator output. Switching on energizes whatever
+// the channel is set to, so its current settings must be within the bench
+// limits; switching off is never refused.
+func switchOutput(ctx context.Context, b *domain.Bench, g port.Generator, alias string, ch int, on bool) error {
+	if on {
+		cur, err := g.State(ctx, ch)
+		if err != nil {
+			return err
+		}
+		if err := CheckGenLimits(b, alias, domain.WaveSpec{}, cur); err != nil {
+			return err
+		}
+	}
+	return g.Output(ctx, ch, on)
 }
 
 // FGState returns the state of one or all generator channels.
