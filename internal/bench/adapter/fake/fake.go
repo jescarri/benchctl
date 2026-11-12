@@ -106,6 +106,9 @@ func (b *Bench) Open(ctx context.Context, alias string) (port.Instrument, error)
 	}
 	b.Opened = append(b.Opened, alias)
 	if g, ok := b.Gens[alias]; ok {
+		if g.opens++; g.opens > 1 && g.ReopenErr != nil {
+			return nil, g.ReopenErr
+		}
 		g.broken = false // a new session
 		return g, nil
 	}
@@ -206,7 +209,13 @@ type Generator struct {
 	// HangWhileBroken makes AllOutputsOff on a broken session wait for its
 	// context to end, as a dead TCP link does until the timeout.
 	HangWhileBroken bool
-	broken          bool
+	// HangOff makes every AllOutputsOff wait for its context to end.
+	HangOff bool
+	// ReopenErr, when set, is returned by Open after the first one (the
+	// instrument dropped off the network after the first session).
+	ReopenErr error
+	broken    bool
+	opens     int
 }
 
 var errBroken = domain.Instrumentf("rpc: connection is broken after an earlier failure")
@@ -311,7 +320,7 @@ func (g *Generator) State(_ context.Context, ch int) (domain.GenChannelState, er
 
 func (g *Generator) AllOutputsOff(ctx context.Context) error {
 	g.bench.mu.Lock()
-	hang := g.broken && g.HangWhileBroken
+	hang := (g.broken && g.HangWhileBroken) || g.HangOff
 	g.bench.mu.Unlock()
 	if hang {
 		<-ctx.Done()

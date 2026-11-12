@@ -952,3 +952,33 @@ func TestSafeUnreachableWinsExitCode(t *testing.T) {
 		t.Fatalf("want unreachable keeping the other failure, got %v", err)
 	}
 }
+
+func TestSafeGivesEachGeneratorItsOwnBudget(t *testing.T) {
+	oldB, oldR := shutdownBudget, shutdownRetryBudget
+	shutdownBudget, shutdownRetryBudget = 100*time.Millisecond, 100*time.Millisecond
+	t.Cleanup(func() { shutdownBudget, shutdownRetryBudget = oldB, oldR })
+	a, b, store, _ := rig(t, straight)
+	b.AddGenerator("fg2")
+	store.B.Instruments["fg2"] = b.Inventory().Instruments["fg2"]
+	must(t, b.Gens["fg2"].Output(context.Background(), 1, true))
+	b.Gens["fg"].HangOff = true // hangs until its budget ends, retry included
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	sr, err := a.Safe(ctx)
+	if err == nil || b.Gens["fg2"].Ch(1).Output {
+		t.Fatalf("a hung generator starved the next one: %+v %v", sr, err)
+	}
+}
+
+func TestSafeRetryUnreachableExitCode(t *testing.T) {
+	a, b, store, _ := rig(t, straight)
+	b.AddGenerator("fg2")
+	store.B.Instruments["fg2"] = b.Inventory().Instruments["fg2"]
+	b.Gens["fg"].OffErr = domain.Instrumentf("OUTP OFF not acknowledged")
+	b.Gens["fg2"].OffErr = domain.Instrumentf("OUTP OFF not acknowledged")
+	b.Gens["fg2"].ReopenErr = domain.Unreachablef("no route to host")
+	sr, err := a.Safe(context.Background())
+	if domain.KindOf(err) != domain.KindUnreachable || !strings.Contains(err.Error(), "fg, fg2") {
+		t.Fatalf("want unreachable listing both, got %+v %v", sr, err)
+	}
+}

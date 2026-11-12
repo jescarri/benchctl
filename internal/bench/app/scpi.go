@@ -210,8 +210,10 @@ func (a *App) safeWith(ctx context.Context, c *conns, b *domain.Bench) ([]SafeRe
 			continue
 		}
 		r := SafeResult{Alias: alias}
-		inst, err := c.get(ctx, alias)
+		gctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), shutdownBudget)
+		inst, err := c.get(gctx, alias)
 		if err != nil {
+			cancel()
 			r.Action, r.Error = "unreachable", err.Error()
 			unconfirmed = append(unconfirmed, alias)
 			unreachable = unreachable || domain.KindOf(err) == domain.KindUnreachable
@@ -220,19 +222,24 @@ func (a *App) safeWith(ctx context.Context, c *conns, b *domain.Bench) ([]SafeRe
 		}
 		o, ok := inst.(port.Outputs)
 		if !ok {
+			cancel()
 			r.Action = "no output control in driver"
 			unconfirmed = append(unconfirmed, alias)
 			out = append(out, r)
 			continue
 		}
-		if err := c.allOff(ctx, alias, o); err != nil {
+		if err := c.allOff(gctx, alias, o); err != nil {
 			r.Action, r.Error = "failed", err.Error()
+			unconfirmed = append(unconfirmed, alias)
+			// A retry that could not reconnect is unreachable, too.
+			unreachable = unreachable || domain.KindOf(err) == domain.KindUnreachable
 			if firstErr == nil {
 				firstErr = err
 			}
 		} else {
 			r.Action = "all outputs off"
 		}
+		cancel()
 		out = append(out, r)
 	}
 	if unreachable {

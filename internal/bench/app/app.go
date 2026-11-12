@@ -65,6 +65,11 @@ func (c *conns) get(ctx context.Context, alias string) (port.Instrument, error) 
 // cancelled with) the caller's context.
 var shutdownRetryBudget = 10 * time.Second
 
+// shutdownBudget bounds the shutdown of one instrument (open + all outputs
+// off). Each instrument gets its own, independent of the caller's context, so
+// one that hangs cannot use up the next one's chance to be switched off.
+var shutdownBudget = 10 * time.Second
+
 // allOff switches off every output of alias through o, its cached session.
 // A failed session can refuse every later call without reaching the
 // instrument (a VXI-11 link is unusable after a cancelled or broken RPC), so
