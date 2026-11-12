@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"gitlab.identitylabs.mx/ai/siglent-ctl/internal/bench/adapter/scpi"
-	"gitlab.identitylabs.mx/ai/siglent-ctl/internal/bench/adapter/scpi/scpitest"
-	"gitlab.identitylabs.mx/ai/siglent-ctl/internal/bench/domain"
+	"github.com/jescarri/benchctl/internal/bench/adapter/scpi"
+	"github.com/jescarri/benchctl/internal/bench/adapter/scpi/scpitest"
+	"github.com/jescarri/benchctl/internal/bench/domain"
 )
 
 // statusSim models the IEEE 488.2 status registers of a SCPI-1999 instrument.

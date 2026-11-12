@@ -1,0 +1,39 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Test
+        run: make all
+      - name: Build binaries
+        run: make cross VERSION=${GITHUB_REF_NAME}
+      - name: Package
+        run: |
+          mkdir -p dist
+          for f in bin/benchctl-*; do
+            name=$(basename "$f")
+            stage=$(mktemp -d)
+            cp "$f" "$stage/benchctl"
+            cp README.md "$stage/"
+            tar -C "$stage" -czf "dist/${name}.tar.gz" benchctl README.md
+          done
+          (cd dist && sha256sum *.tar.gz > checksums.txt)
+          ls -l dist
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" --generate-notes --verify-tag

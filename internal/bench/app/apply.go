@@ -11,7 +11,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"gitlab.identitylabs.mx/ai/siglent-ctl/internal/bench/domain"
+	"github.com/jescarri/benchctl/internal/bench/domain"
 )
 
 // Plan is a declarative setup + measurement + assertion sequence.

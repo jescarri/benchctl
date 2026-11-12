@@ -1,5 +1,8 @@
 # benchctl
 
+[![ci](https://github.com/jescarri/benchctl/actions/workflows/ci.yml/badge.svg)](https://github.com/jescarri/benchctl/actions/workflows/ci.yml)
+[![release](https://img.shields.io/github/v/release/jescarri/benchctl)](https://github.com/jescarri/benchctl/releases)
+
 A SCPI command-line tool for running bench measurements from an agent. It drives a Siglent
 oscilloscope (SDS1000X-E), function generator (SDG1000X) and multimeter (SDM3000X) over
 VXI-11. A raw socket on TCP 5025 is a last resort, used only when you ask for it with
@@ -8,6 +11,23 @@ VXI-11. A raw socket on TCP 5025 is a last resort, used only when you ask for it
 
 Output is JSON on stdout (`--human` gives tables) and diagnostics on stderr. Exit codes:
 `0` ok, `1` instrument/SCPI error, `2` usage, `3` unreachable, `4` verification failed.
+
+## Install
+
+Prebuilt static binaries (linux/darwin × amd64/arm64) are on the
+[releases page](https://github.com/jescarri/benchctl/releases):
+
+```sh
+v=v0.1.0; os=linux; arch=amd64
+curl -fsSL "https://github.com/jescarri/benchctl/releases/download/$v/benchctl-$os-$arch.tar.gz" | tar -xz benchctl
+sudo install benchctl /usr/local/bin/
+```
+
+Each release has a `checksums.txt` (SHA-256). Or build from source with Go ≥ 1.27:
+
+```sh
+go install github.com/jescarri/benchctl/cmd/benchctl@latest
+```
 
 ## Build
 
@@ -24,6 +44,15 @@ make help
 `go` switches to the toolchain pinned in `go.mod` (go1.27.4) on its own. `make lint` needs a
 golangci-lint built with Go ≥ 1.27; a plain `go install` builds it with Go 1.26, so force the toolchain:
 `GOTOOLCHAIN=go1.27.4 go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest`.
+
+CI (`.github/workflows/ci.yml`) runs `make all`, `race`, `cross` and `lint` on every push to
+`master` and every pull request. Pushing a `v*` tag runs `.github/workflows/release.yml`, which
+tests, cross-compiles with the tag as the version, and publishes the tarballs and checksums as a
+GitHub release:
+
+```sh
+git tag v0.1.0 && git push origin v0.1.0
+```
 
 ## Quick start
 

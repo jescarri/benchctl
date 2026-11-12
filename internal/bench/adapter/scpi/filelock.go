@@ -10,7 +10,7 @@ import (
 	"syscall"
 	"time"
 
-	"gitlab.identitylabs.mx/ai/siglent-ctl/internal/bench/domain"
+	"github.com/jescarri/benchctl/internal/bench/domain"
 )
 
 // FileLock is an exclusive advisory lock on one instrument (by serial), held

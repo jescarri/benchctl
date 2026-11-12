@@ -10,12 +10,12 @@ import (
 	"net"
 	"time"
 
-	"gitlab.identitylabs.mx/ai/siglent-ctl/internal/bench/adapter/scpi"
-	"gitlab.identitylabs.mx/ai/siglent-ctl/internal/bench/adapter/siglent"
-	"gitlab.identitylabs.mx/ai/siglent-ctl/internal/bench/adapter/transport/raw"
-	"gitlab.identitylabs.mx/ai/siglent-ctl/internal/bench/adapter/transport/vxi11"
-	"gitlab.identitylabs.mx/ai/siglent-ctl/internal/bench/domain"
-	"gitlab.identitylabs.mx/ai/siglent-ctl/internal/bench/port"
+	"github.com/jescarri/benchctl/internal/bench/adapter/scpi"
+	"github.com/jescarri/benchctl/internal/bench/adapter/siglent"
+	"github.com/jescarri/benchctl/internal/bench/adapter/transport/raw"
+	"github.com/jescarri/benchctl/internal/bench/adapter/transport/vxi11"
+	"github.com/jescarri/benchctl/internal/bench/domain"
+	"github.com/jescarri/benchctl/internal/bench/port"
 )
 
 // Transport names.

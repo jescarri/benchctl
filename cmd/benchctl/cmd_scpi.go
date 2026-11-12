@@ -7,8 +7,8 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	"gitlab.identitylabs.mx/ai/siglent-ctl/internal/bench/app"
-	"gitlab.identitylabs.mx/ai/siglent-ctl/internal/bench/domain"
+	"github.com/jescarri/benchctl/internal/bench/app"
+	"github.com/jescarri/benchctl/internal/bench/domain"
 )
 
 func rawCmd(e *env) *cli.Command {

@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"strings"
 
-	"gitlab.identitylabs.mx/ai/siglent-ctl/internal/bench/adapter/scpi"
-	"gitlab.identitylabs.mx/ai/siglent-ctl/internal/bench/adapter/siglent/base"
-	"gitlab.identitylabs.mx/ai/siglent-ctl/internal/bench/domain"
-	"gitlab.identitylabs.mx/ai/siglent-ctl/internal/bench/port"
+	"github.com/jescarri/benchctl/internal/bench/adapter/scpi"
+	"github.com/jescarri/benchctl/internal/bench/adapter/siglent/base"
+	"github.com/jescarri/benchctl/internal/bench/domain"
+	"github.com/jescarri/benchctl/internal/bench/port"
 )
 
 // Generator implements port.Generator and port.Outputs.

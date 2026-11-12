@@ -10,8 +10,8 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	"gitlab.identitylabs.mx/ai/siglent-ctl/internal/bench/adapter/bmp"
-	"gitlab.identitylabs.mx/ai/siglent-ctl/internal/bench/domain"
+	"github.com/jescarri/benchctl/internal/bench/adapter/bmp"
+	"github.com/jescarri/benchctl/internal/bench/domain"
 )
 
 type shotResult struct {

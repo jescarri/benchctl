@@ -73,7 +73,7 @@ the SDG and SDM; the SDS uses `CMR?`/`EXR?` for errors instead.
 
 ### 1. Standalone repo `siglent-ctl`, binary `cmd/benchctl`, built on `urfave/cli/v3`
 
-- Module: `gitlab.identitylabs.mx/ai/siglent-ctl`, **Go 1.27** (`go 1.27.4` toolchain).
+- Module: `github.com/jescarri/benchctl`, **Go 1.27** (`go 1.27.4` toolchain).
 - It lives in its own repo, separate from agentctl. The agent image installs the released
   binary like any other tool.
 

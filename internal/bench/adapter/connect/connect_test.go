@@ -12,11 +12,11 @@ import (
 	"testing"
 	"time"
 
-	"gitlab.identitylabs.mx/ai/siglent-ctl/internal/bench/adapter/config"
-	"gitlab.identitylabs.mx/ai/siglent-ctl/internal/bench/adapter/connect"
-	"gitlab.identitylabs.mx/ai/siglent-ctl/internal/bench/adapter/discovery"
-	"gitlab.identitylabs.mx/ai/siglent-ctl/internal/bench/adapter/scpi"
-	"gitlab.identitylabs.mx/ai/siglent-ctl/internal/bench/domain"
+	"github.com/jescarri/benchctl/internal/bench/adapter/config"
+	"github.com/jescarri/benchctl/internal/bench/adapter/connect"
+	"github.com/jescarri/benchctl/internal/bench/adapter/discovery"
+	"github.com/jescarri/benchctl/internal/bench/adapter/scpi"
+	"github.com/jescarri/benchctl/internal/bench/domain"
 )
 
 // instrument starts a raw-socket SDM3045X stand-in on ip:port.

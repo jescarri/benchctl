@@ -1,4 +1,4 @@
-module gitlab.identitylabs.mx/ai/siglent-ctl
+module github.com/jescarri/benchctl
 
 go 1.27
 

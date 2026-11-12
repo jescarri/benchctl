@@ -6,8 +6,8 @@ import (
 	"sort"
 	"time"
 
-	"gitlab.identitylabs.mx/ai/siglent-ctl/internal/bench/domain"
-	"gitlab.identitylabs.mx/ai/siglent-ctl/internal/bench/port"
+	"github.com/jescarri/benchctl/internal/bench/domain"
+	"github.com/jescarri/benchctl/internal/bench/port"
 )
 
 // DiscoverResult is the output of Discover.

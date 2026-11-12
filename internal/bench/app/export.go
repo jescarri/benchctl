@@ -9,7 +9,7 @@ import (
 	"math/cmplx"
 	"strconv"
 
-	"gitlab.identitylabs.mx/ai/siglent-ctl/internal/bench/domain"
+	"github.com/jescarri/benchctl/internal/bench/domain"
 )
 
 // WriteWaveformCSV writes "t,v" rows.

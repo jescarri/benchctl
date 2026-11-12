@@ -11,8 +11,8 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	"gitlab.identitylabs.mx/ai/siglent-ctl/internal/bench/app"
-	"gitlab.identitylabs.mx/ai/siglent-ctl/internal/bench/domain"
+	"github.com/jescarri/benchctl/internal/bench/app"
+	"github.com/jescarri/benchctl/internal/bench/domain"
 )
 
 var aliasFlag = &cli.StringFlag{Name: "alias", Usage: "instrument alias (default: the only one with this role)"}

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"gitlab.identitylabs.mx/ai/siglent-ctl/internal/bench/app"
+	"github.com/jescarri/benchctl/internal/bench/app"
 )
 
 func runCLI(t *testing.T, args ...string) (int, string, string) {

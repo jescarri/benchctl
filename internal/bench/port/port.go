@@ -6,7 +6,7 @@ import (
 	"context"
 	"time"
 
-	"gitlab.identitylabs.mx/ai/siglent-ctl/internal/bench/domain"
+	"github.com/jescarri/benchctl/internal/bench/domain"
 )
 
 // Transport moves SCPI messages to and from one instrument (VXI-11 or raw socket).

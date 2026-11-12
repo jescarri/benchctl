@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"gitlab.identitylabs.mx/ai/siglent-ctl/internal/bench/adapter/fake"
-	"gitlab.identitylabs.mx/ai/siglent-ctl/internal/bench/domain"
-	"gitlab.identitylabs.mx/ai/siglent-ctl/internal/bench/port"
+	"github.com/jescarri/benchctl/internal/bench/adapter/fake"
+	"github.com/jescarri/benchctl/internal/bench/domain"
+	"github.com/jescarri/benchctl/internal/bench/port"
 )
 
 // rig builds the real bench topology: fg CH1→scope C1, fg CH2→scope C2,

@@ -11,9 +11,9 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	"gitlab.identitylabs.mx/ai/siglent-ctl/internal/bench/adapter/connect"
-	"gitlab.identitylabs.mx/ai/siglent-ctl/internal/bench/app"
-	"gitlab.identitylabs.mx/ai/siglent-ctl/internal/bench/domain"
+	"github.com/jescarri/benchctl/internal/bench/adapter/connect"
+	"github.com/jescarri/benchctl/internal/bench/app"
+	"github.com/jescarri/benchctl/internal/bench/domain"
 )
 
 func discoverCmd(e *env) *cli.Command {

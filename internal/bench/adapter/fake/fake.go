@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"gitlab.identitylabs.mx/ai/siglent-ctl/internal/bench/domain"
-	"gitlab.identitylabs.mx/ai/siglent-ctl/internal/bench/port"
+	"github.com/jescarri/benchctl/internal/bench/domain"
+	"github.com/jescarri/benchctl/internal/bench/port"
 )
 
 // Cable connects a generator channel to a scope channel (or DMM, ScopeCh=0).

@@ -5,13 +5,13 @@ import (
 	"context"
 	"strings"
 
-	"gitlab.identitylabs.mx/ai/siglent-ctl/internal/bench/adapter/scpi"
-	"gitlab.identitylabs.mx/ai/siglent-ctl/internal/bench/adapter/siglent/base"
-	"gitlab.identitylabs.mx/ai/siglent-ctl/internal/bench/adapter/siglent/sdg1000x"
-	"gitlab.identitylabs.mx/ai/siglent-ctl/internal/bench/adapter/siglent/sdm3000x"
-	"gitlab.identitylabs.mx/ai/siglent-ctl/internal/bench/adapter/siglent/sds1000xe"
-	"gitlab.identitylabs.mx/ai/siglent-ctl/internal/bench/domain"
-	"gitlab.identitylabs.mx/ai/siglent-ctl/internal/bench/port"
+	"github.com/jescarri/benchctl/internal/bench/adapter/scpi"
+	"github.com/jescarri/benchctl/internal/bench/adapter/siglent/base"
+	"github.com/jescarri/benchctl/internal/bench/adapter/siglent/sdg1000x"
+	"github.com/jescarri/benchctl/internal/bench/adapter/siglent/sdm3000x"
+	"github.com/jescarri/benchctl/internal/bench/adapter/siglent/sds1000xe"
+	"github.com/jescarri/benchctl/internal/bench/domain"
+	"github.com/jescarri/benchctl/internal/bench/port"
 )
 
 // RoleFor returns the role implied by a model name.

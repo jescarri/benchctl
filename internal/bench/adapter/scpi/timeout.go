@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"gitlab.identitylabs.mx/ai/siglent-ctl/internal/bench/port"
+	"github.com/jescarri/benchctl/internal/bench/port"
 )
 
 // IOTimeout wraps a Transport so every operation without a caller deadline

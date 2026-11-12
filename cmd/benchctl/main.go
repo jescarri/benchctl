@@ -17,12 +17,12 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	"gitlab.identitylabs.mx/ai/siglent-ctl/internal/bench/adapter/config"
-	"gitlab.identitylabs.mx/ai/siglent-ctl/internal/bench/adapter/connect"
-	"gitlab.identitylabs.mx/ai/siglent-ctl/internal/bench/adapter/discovery"
-	"gitlab.identitylabs.mx/ai/siglent-ctl/internal/bench/adapter/siglent"
-	"gitlab.identitylabs.mx/ai/siglent-ctl/internal/bench/app"
-	"gitlab.identitylabs.mx/ai/siglent-ctl/internal/bench/domain"
+	"github.com/jescarri/benchctl/internal/bench/adapter/config"
+	"github.com/jescarri/benchctl/internal/bench/adapter/connect"
+	"github.com/jescarri/benchctl/internal/bench/adapter/discovery"
+	"github.com/jescarri/benchctl/internal/bench/adapter/siglent"
+	"github.com/jescarri/benchctl/internal/bench/app"
+	"github.com/jescarri/benchctl/internal/bench/domain"
 )
 
 // Set by the linker (see Makefile).

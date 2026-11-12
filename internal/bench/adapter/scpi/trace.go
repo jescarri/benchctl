@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"gitlab.identitylabs.mx/ai/siglent-ctl/internal/bench/port"
+	"github.com/jescarri/benchctl/internal/bench/port"
 )
 
 // Tracer wraps a Transport and logs every exchange to w (the --verbose flag).
