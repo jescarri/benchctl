@@ -78,8 +78,8 @@ var couplingFromSCPI = map[string]string{"D1M": "dc", "A1M": "ac", "GND": "gnd",
 var validProbe = []float64{0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000}
 
 // SetupChannel implements port.Scope. Order matters: probe first, since it
-// rescales VDIV and OFST.
-func (s *Scope) SetupChannel(ctx context.Context, ch int, c domain.ChannelSetup) error {
+// rescales VDIV and OFST. Vertical settings need the trace shown (see below).
+func (s *Scope) SetupChannel(ctx context.Context, ch int, c domain.ChannelSetup) (err error) {
 	if err := base.CheckChannel(ch, s.channels); err != nil {
 		return err
 	}
@@ -96,11 +96,44 @@ func (s *Scope) SetupChannel(ctx context.Context, ch int, c domain.ChannelSetup)
 			return err
 		}
 	}
-	if c.Coupling != "" {
-		cpl, ok := couplingToSCPI[strings.ToLower(c.Coupling)]
-		if !ok {
-			return domain.Usagef("unknown coupling %q (dc, ac, gnd, dc50, ac50)", c.Coupling)
+	cpl, ok := couplingToSCPI[strings.ToLower(c.Coupling)]
+	if c.Coupling != "" && !ok {
+		return domain.Usagef("unknown coupling %q (dc, ac, gnd, dc50, ac50)", c.Coupling)
+	}
+	// Firmware 8.1.6.1.35R2 silently ignores VDIV while the trace is off, and
+	// OFST/CPL switch the trace on. Vertical settings are therefore applied
+	// with the trace shown, and a hidden trace is hidden again afterwards
+	// unless On asks for it.
+	final := c.On
+	if c.VDiv != nil || c.Offset != nil || c.Coupling != "" {
+		shown := c.On != nil && *c.On
+		if !shown {
+			tra, err := s.S.Query(ctx, p+"TRA?")
+			if err != nil {
+				return err
+			}
+			shown = strings.EqualFold(strings.TrimSpace(tra), "ON")
 		}
+		if !shown {
+			if err := s.S.Set(ctx, p+"TRA ON"); err != nil {
+				return err
+			}
+			if final == nil {
+				final = new(false)
+			}
+			defer func() {
+				if err != nil {
+					_ = s.S.Set(context.WithoutCancel(ctx), p+"TRA OFF")
+				}
+			}()
+		} else if c.On != nil && *c.On {
+			if err := s.S.Set(ctx, p+"TRA ON"); err != nil {
+				return err
+			}
+			final = nil
+		}
+	}
+	if c.Coupling != "" {
 		if err := s.S.Set(ctx, p+"CPL "+cpl); err != nil {
 			return err
 		}
@@ -131,8 +164,8 @@ func (s *Scope) SetupChannel(ctx context.Context, ch int, c domain.ChannelSetup)
 			return err
 		}
 	}
-	if c.On != nil {
-		if err := s.S.Set(ctx, p+"TRA "+onOff(*c.On)); err != nil {
+	if final != nil {
+		if err := s.S.Set(ctx, p+"TRA "+onOff(*final)); err != nil {
 			return err
 		}
 	}
