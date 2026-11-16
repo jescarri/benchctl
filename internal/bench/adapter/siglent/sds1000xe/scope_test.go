@@ -126,11 +126,13 @@ func (s *sim) handle(cmd string) (string, bool) {
 	case "CMR?", "EXR?":
 		return "0", true
 	case "VDIV":
-		s.vdiv[ch] = clamp(num(), 5e-4, 10) // silent clamp
+		if s.tra[ch] { // firmware ignores VDIV on a hidden trace
+			s.vdiv[ch] = clamp(num(), 5e-4, 10) // silent clamp
+		}
 	case "VDIV?":
 		return e(s.vdiv[ch]), true
 	case "OFST":
-		s.ofst[ch] = num()
+		s.ofst[ch], s.tra[ch] = num(), true // OFST shows the trace
 	case "OFST?":
 		return e(s.ofst[ch]), true
 	case "ATTN":
@@ -138,7 +140,7 @@ func (s *sim) handle(cmd string) (string, bool) {
 	case "ATTN?":
 		return strconv.FormatFloat(s.attn[ch], 'g', -1, 64), true
 	case "CPL":
-		s.cpl[ch] = arg
+		s.cpl[ch], s.tra[ch] = arg, true // CPL shows the trace
 	case "CPL?":
 		return s.cpl[ch], true
 	case "TRA":
@@ -283,6 +285,40 @@ func TestSetupChannel(t *testing.T) {
 	}
 	if err := sc.SetupChannel(ctx, 5, domain.ChannelSetup{}); domain.KindOf(err) != domain.KindUsage {
 		t.Fatalf("bad channel: %v", err)
+	}
+}
+
+// Verified on hardware (fw 8.1.6.1.35R2): VDIV is ignored on a hidden trace
+// and OFST/CPL show it. Settings must still apply, and the trace must end in
+// the requested state (or stay hidden when On is not given).
+func TestSetupChannelHiddenTrace(t *testing.T) {
+	s := newSim(fixture(t))
+	sc, _ := newScope(t, s)
+	ctx := context.Background()
+	if err := sc.SetupChannel(ctx, 2, domain.ChannelSetup{VDiv: f(0.2), Offset: f(0.1), Coupling: "dc"}); err != nil {
+		t.Fatal(err)
+	}
+	if s.vdiv[2] != 0.2 || s.ofst[2] != 0.1 || s.tra[2] {
+		t.Fatalf("vdiv=%v ofst=%v tra=%v, want 0.2 0.1 hidden", s.vdiv[2], s.ofst[2], s.tra[2])
+	}
+	if err := sc.SetupChannel(ctx, 3, domain.ChannelSetup{VDiv: f(0.5), On: b(true)}); err != nil {
+		t.Fatal(err)
+	}
+	if s.vdiv[3] != 0.5 || !s.tra[3] {
+		t.Fatalf("vdiv=%v tra=%v, want 0.5 shown", s.vdiv[3], s.tra[3])
+	}
+	if err := sc.SetupChannel(ctx, 3, domain.ChannelSetup{VDiv: f(1), On: b(false)}); err != nil {
+		t.Fatal(err)
+	}
+	if s.vdiv[3] != 1 || s.tra[3] {
+		t.Fatalf("vdiv=%v tra=%v, want 1 hidden", s.vdiv[3], s.tra[3])
+	}
+	// A failed vertical setting must not leave a hidden trace shown.
+	if err := sc.SetupChannel(ctx, 4, domain.ChannelSetup{VDiv: f(999)}); err == nil {
+		t.Fatal("clamp not detected")
+	}
+	if s.tra[4] {
+		t.Fatal("trace left shown after a failed setup")
 	}
 }
 
